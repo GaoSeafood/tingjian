@@ -1,0 +1,77 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://tingjian:${POSTGRES_PASSWORD}@db:5432/tingjian
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-18092}:8000"
+    volumes:
+      - app-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "tingjian", "--with-scheduler"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://tingjian:${POSTGRES_PASSWORD}@db:5432/tingjian
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+    volumes:
+      - app-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tingjian
+      POSTGRES_USER: tingjian
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tingjian -d tingjian"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  app-data:
+  postgres-data:
+  redis-data:
+

@@ -1,0 +1,40 @@
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+
+def _bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class Settings:
+    data_dir: Path = Path(os.getenv("DATA_DIR", "/data"))
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:////data/app.db")
+    redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    session_secret: str = os.getenv("SESSION_SECRET", "dev-only-change-me")
+    session_max_age: int = int(os.getenv("SESSION_MAX_AGE", str(30 * 24 * 3600)))
+    secure_cookie: bool = _bool("SECURE_COOKIE", False)
+    admin_username: str = os.getenv("ADMIN_USERNAME", "admin")
+    admin_password: str = os.getenv("ADMIN_PASSWORD", "change-me")
+    max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "2048"))
+    source_retention_hours: int = int(os.getenv("SOURCE_RETENTION_HOURS", "24"))
+    asr_provider: str = os.getenv("ASR_PROVIDER", "mimo")
+    mimo_api_key: str = os.getenv("MIMO_API_KEY", "")
+    mimo_base_url: str = os.getenv("MIMO_BASE_URL", "https://api.xiaomimimo.com/v1")
+    mimo_model: str = os.getenv("MIMO_MODEL", "mimo-v2.5-asr")
+    asr_language: str = os.getenv("ASR_LANGUAGE", "auto")
+    asr_chunk_seconds: int = int(os.getenv("ASR_CHUNK_SECONDS", "45"))
+    custom_asr_base_url: str = os.getenv("CUSTOM_ASR_BASE_URL", "")
+    custom_asr_api_key: str = os.getenv("CUSTOM_ASR_API_KEY", "")
+    custom_asr_model: str = os.getenv("CUSTOM_ASR_MODEL", "whisper-1")
+    sub2api_base_url: str = os.getenv("SUB2API_BASE_URL", "")
+    sub2api_api_key: str = os.getenv("SUB2API_API_KEY", "")
+    llm_primary_model: str = os.getenv("LLM_PRIMARY_MODEL", "gemini-2.5-pro")
+    llm_fallback_model: str = os.getenv("LLM_FALLBACK_MODEL", "gpt-5.4")
+
+
+settings = Settings()
+settings.data_dir.mkdir(parents=True, exist_ok=True)
+(settings.data_dir / "tasks").mkdir(parents=True, exist_ok=True)
+
