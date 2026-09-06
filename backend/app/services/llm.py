@@ -11,10 +11,11 @@ def _call(messages: list[dict]) -> str:
     if not cfg["sub2api_base_url"] or not cfg["sub2api_api_key"]:
         raise RuntimeError("服务器尚未配置 Sub2API")
     errors = []
-    providers = (
-        (cfg["llm_primary_model"], cfg["sub2api_api_key"]),
-        (cfg["llm_fallback_model"], cfg["sub2api_fallback_api_key"] or cfg["sub2api_api_key"]),
-    )
+    providers = [(cfg["llm_primary_model"], cfg["sub2api_api_key"])]
+    # Sub2API keys are bound to a group. Do not send a GPT model through the
+    # Gemini-group key when no dedicated fallback key was configured.
+    if cfg["sub2api_fallback_api_key"]:
+        providers.append((cfg["llm_fallback_model"], cfg["sub2api_fallback_api_key"]))
     for model, api_key in providers:
         if not model:
             errors.append("未配置模型")
