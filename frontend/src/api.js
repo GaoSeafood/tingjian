@@ -21,6 +21,10 @@ export const api = {
   health: () => request('/api/health'),
   tasks: () => request('/api/tasks'),
   providerSettings: () => request('/api/settings/providers'),
+  adminUsers: () => request('/api/admin/users'),
+  createUser: (username, password) => request('/api/admin/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
+  }),
   saveProviderSettings: (settings) => request('/api/settings/providers', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
   }),

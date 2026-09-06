@@ -23,7 +23,7 @@ function Header({ page, setPage, user, onLogout }) {
       <button className={page === 'home' || page === 'detail' ? 'active' : ''} onClick={() => setPage('home')}>工作台</button>
       <button className={page === 'history' ? 'active' : ''} onClick={() => setPage('history')}>历史记录</button>
     </nav>
-    <div className="account"><span><UserRound size={18}/>{user?.username}</span><button title="接口设置" onClick={() => setPage('settings')}><SlidersHorizontal size={18}/></button><button title="退出登录" onClick={onLogout}><LogOut size={18}/></button></div>
+    <div className="account"><span><UserRound size={18}/>{user?.username}</span><button title="账户设置" onClick={() => setPage('settings')}><SlidersHorizontal size={18}/></button><button title="退出登录" onClick={onLogout}><LogOut size={18}/></button></div>
   </header>
 }
 
@@ -221,13 +221,18 @@ function Detail({ taskId, onBack, onSettings }) {
   </main>
 }
 
-function SettingsPage({ onBack }) {
+function SettingsPage({ onBack, user }) {
   const [form, setForm] = useState(null)
+  const [users, setUsers] = useState([])
+  const [newUser, setNewUser] = useState({username: '', password: ''})
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [passwords, setPasswords] = useState({current: '', next: ''})
-  useEffect(() => { api.providerSettings().then(setForm).catch(err => setError(err.message)) }, [])
+  useEffect(() => {
+    if (user?.role !== 'admin') { setForm({}); return }
+    Promise.all([api.providerSettings(), api.adminUsers()]).then(([settings, accounts]) => { setForm(settings); setUsers(accounts) }).catch(err => setError(err.message))
+  }, [user])
   const set = (key, value) => setForm(current => ({...current, [key]: value}))
   const save = async (event) => {
     event.preventDefault(); setBusy(true); setMessage(''); setError('')
@@ -244,12 +249,19 @@ function SettingsPage({ onBack }) {
       setPasswords({current: '', next: ''}); setMessage('登录密码已更新。')
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
+  const createAccount = async () => {
+    setBusy(true); setMessage(''); setError('')
+    try {
+      const account = await api.createUser(newUser.username, newUser.password)
+      setUsers(current => [...current, account]); setNewUser({username: '', password: ''}); setMessage(`已创建账号 ${account.username}，请把初始密码安全发给朋友。`)
+    } catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
   if (!form) return <main className="loading-page"><LoaderCircle className="spin"/>加载接口设置</main>
   return <main className="settings-page shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
-    <div className="settings-heading"><SlidersHorizontal/><div><h1>接口设置</h1><p>密钥加密保存在服务器，不会在页面中回显。</p></div></div>
-    <form className="settings-form" onSubmit={save}>
-      <section><div className="settings-section-title"><h2>语音听写</h2><p>默认使用免费的 MiMo-V2.5-ASR，也可以切换到兼容 Whisper 的服务。</p></div>
+    <div className="settings-heading"><SlidersHorizontal/><div><h1>{user?.role === 'admin' ? '管理员设置' : '账户设置'}</h1><p>{user?.role === 'admin' ? '只有你能修改 ASR、Sub2API 和模型设置。' : '你可以修改自己的登录密码，不能查看管理员接口设置。'}</p></div></div>
+    <form className="settings-form" onSubmit={user?.role === 'admin' ? save : event => event.preventDefault()}>
+      {user?.role === 'admin' && <><section><div className="settings-section-title"><h2>语音听写</h2><p>ASR 密钥只由管理员维护，朋友无法查看。</p></div>
         <div className="field-grid">
           <label>ASR 服务<select value={form.asr_provider} onChange={e => set('asr_provider', e.target.value)}><option value="mimo">小米 MiMo</option><option value="custom">自定义 Whisper 兼容接口</option></select></label>
           <label>识别语言<select value={form.asr_language} onChange={e => set('asr_language', e.target.value)}><option value="auto">自动识别</option><option value="zh">中文</option><option value="en">英文</option></select></label>
@@ -264,7 +276,7 @@ function SettingsPage({ onBack }) {
           </>}
         </div>
       </section>
-      <section><div className="settings-section-title"><h2>文案 AI</h2><p>只在你点击找亮点或复刻改编时调用 Sub2API。</p></div>
+      <section><div className="settings-section-title"><h2>文案 AI</h2><p>只在用户点击找亮点或复刻改编时调用 Sub2API。</p></div>
         <div className="field-grid">
           <label className="wide">Sub2API Base URL<input value={form.sub2api_base_url} onChange={e => set('sub2api_base_url', e.target.value)} placeholder="http://100.x.x.x:18081/v1"/></label>
           <label>Sub2API API Key<input type="password" value={form.sub2api_api_key || ''} onChange={e => set('sub2api_api_key', e.target.value)} placeholder={form.sub2api_api_key_configured ? '已配置，留空保持不变' : '请输入专用 API Key'}/></label>
@@ -273,12 +285,16 @@ function SettingsPage({ onBack }) {
           <label className="wide">备用 Sub2API API Key（可选）<input type="password" value={form.sub2api_fallback_api_key || ''} onChange={e => set('sub2api_fallback_api_key', e.target.value)} placeholder={form.sub2api_fallback_api_key_configured ? '已配置，留空保持不变' : 'GPT 若属于其他分组，请填写绑定 OpenAI 分组的 Key'}/></label>
         </div>
       </section>
-      <section><div className="settings-section-title"><h2>登录安全</h2><p>首次部署后请立即修改临时管理员密码。</p></div>
+      <section><div className="settings-section-title"><h2>朋友账号</h2><p>手动创建账号，不开放陌生人注册。</p></div>
+        <div className="account-create"><input value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} placeholder="朋友用户名"/><input type="password" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} placeholder="初始密码（至少 12 位）"/><button type="button" className="outline" disabled={busy || newUser.username.trim().length < 3 || newUser.password.length < 12} onClick={createAccount}>创建账号</button></div>
+        <div className="user-list">{users.map(item => <div key={item.id}><span>{item.username}</span><small>{item.role === 'admin' ? '管理员' : '普通用户'}</small></div>)}</div>
+      </section></>}
+      <section><div className="settings-section-title"><h2>登录安全</h2><p>建议每个账号首次登录后修改初始密码。</p></div>
         <div className="field-grid"><label>当前密码<input type="password" value={passwords.current} onChange={e => setPasswords({...passwords,current:e.target.value})}/></label><label>新密码（至少 12 位）<input type="password" value={passwords.next} onChange={e => setPasswords({...passwords,next:e.target.value})}/></label></div>
         <button type="button" className="outline password-button" disabled={busy || !passwords.current || passwords.next.length < 12} onClick={changePassword}>更新登录密码</button>
       </section>
       {message && <div className="success-line"><Check size={17}/>{message}</div>}{error && <div className="error-line">{error}</div>}
-      <button className="primary save-settings" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18}/> : <Save size={18}/>}保存设置</button>
+      {user?.role === 'admin' && <button className="primary save-settings" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18}/> : <Save size={18}/>}保存接口设置</button>}
     </form>
   </main>
 }
@@ -305,7 +321,7 @@ function App() {
   return <div className="app"><Header page={page} setPage={setPage} user={user} onLogout={async () => { await api.logout(); setUser(null) }}/>
     {page === 'home' && <Home tasks={tasks} refresh={refresh} onOpen={open}/>} 
     {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>历史记录</h1><p>你的听写、亮点与改编结果都保存在这里。</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full/></main>}
-    {page === 'settings' && <SettingsPage onBack={() => setPage('home')}/>} 
+    {page === 'settings' && <SettingsPage user={user} onBack={() => setPage('home')}/>}
     {page === 'detail' && selected && <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} onSettings={() => setPage('settings')}/>} 
     <footer className="statusbar"><span><span className="footer-wave"><i/><i/><i/></span><i className="online"/>ASR 服务在线</span><span><LockKeyhole size={15}/>仅你可访问</span></footer>
   </div>

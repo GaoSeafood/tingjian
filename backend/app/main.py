@@ -60,6 +60,11 @@ class PasswordBody(BaseModel):
     new_password: str
 
 
+class UserCreateBody(BaseModel):
+    username: str
+    password: str
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
@@ -94,6 +99,12 @@ def owned_task(task_id: str, user: User, db: Session) -> Task:
     if not task:
         raise HTTPException(404, "任务不存在")
     return task
+
+
+def admin_only(user: User = Depends(current_user)) -> User:
+    if user.role != "admin":
+        raise HTTPException(403, "仅管理员可以执行此操作")
+    return user
 
 
 @app.get("/api/health")
@@ -134,6 +145,28 @@ def change_password(body: PasswordBody, user: User = Depends(current_user), db: 
     user.password_hash = hash_password(body.new_password)
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/admin/users")
+def list_users(user: User = Depends(admin_only), db: Session = Depends(get_db)):
+    users = db.scalars(select(User).order_by(User.created_at)).all()
+    return [{"id": item.id, "username": item.username, "role": item.role, "created_at": item.created_at.isoformat()} for item in users]
+
+
+@app.post("/api/admin/users")
+def create_user(body: UserCreateBody, user: User = Depends(admin_only), db: Session = Depends(get_db)):
+    username = body.username.strip()
+    if len(username) < 3 or len(username) > 80:
+        raise HTTPException(400, "用户名需要 3～80 个字符")
+    if len(body.password) < 12:
+        raise HTTPException(400, "初始密码至少需要 12 个字符")
+    if db.scalar(select(User).where(User.username == username)):
+        raise HTTPException(409, "用户名已存在")
+    account = User(username=username, password_hash=hash_password(body.password), role="user")
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return {"id": account.id, "username": account.username, "role": account.role, "created_at": account.created_at.isoformat()}
 
 
 @app.get("/api/settings/providers")
