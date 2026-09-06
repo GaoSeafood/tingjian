@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import os
 import shutil
 import socket
@@ -70,6 +71,28 @@ def probe_duration(path: Path) -> float:
     return float(result.stdout.strip())
 
 
+def ensure_browser_preview(media_path: Path, task_dir: Path) -> Path:
+    """Return an H.264/AAC MP4 for consistent playback in Chromium browsers."""
+    preview = task_dir / "preview.mp4"
+    if preview.exists() and preview.stat().st_size > 0:
+        return preview
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,pix_fmt", "-of", "json", str(media_path)],
+        capture_output=True, text=True, timeout=60, check=True,
+    )
+    streams = json.loads(result.stdout).get("streams") or [{}]
+    video = streams[0]
+    if media_path.suffix.lower() == ".mp4" and video.get("codec_name") == "h264" and video.get("pix_fmt") == "yuv420p":
+        return media_path
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(media_path),
+        "-vf", "scale=1280:1280:force_original_aspect_ratio=decrease",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(preview),
+    ], capture_output=True, timeout=7200, check=True)
+    return preview
+
+
 def split_audio(media_path: Path, task_dir: Path, chunk_seconds: int) -> list[Path]:
     chunk_dir = task_dir / "audio"
     shutil.rmtree(chunk_dir, ignore_errors=True)
@@ -89,6 +112,9 @@ def split_audio(media_path: Path, task_dir: Path, chunk_seconds: int) -> list[Pa
 def delete_source(path: str | None) -> None:
     if path:
         try:
-            Path(path).unlink(missing_ok=True)
+            source = Path(path)
+            source.unlink(missing_ok=True)
+            (source.parent / "preview.mp4").unlink(missing_ok=True)
+            shutil.rmtree(source.parent / "audio", ignore_errors=True)
         except OSError:
             pass

@@ -30,6 +30,7 @@ class Settings:
     custom_asr_model: str = os.getenv("CUSTOM_ASR_MODEL", "whisper-1")
     sub2api_base_url: str = os.getenv("SUB2API_BASE_URL", "")
     sub2api_api_key: str = os.getenv("SUB2API_API_KEY", "")
+    sub2api_fallback_api_key: str = os.getenv("SUB2API_FALLBACK_API_KEY", "")
     llm_primary_model: str = os.getenv("LLM_PRIMARY_MODEL", "gemini-2.5-pro")
     llm_fallback_model: str = os.getenv("LLM_FALLBACK_MODEL", "gpt-5.4")
 
@@ -37,4 +38,3 @@ class Settings:
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 (settings.data_dir / "tasks").mkdir(parents=True, exist_ok=True)
-

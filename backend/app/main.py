@@ -50,6 +50,7 @@ class ProviderSettingsBody(BaseModel):
     custom_asr_model: str | None = None
     sub2api_base_url: str | None = None
     sub2api_api_key: str | None = None
+    sub2api_fallback_api_key: str | None = None
     llm_primary_model: str | None = None
     llm_fallback_model: str | None = None
 
@@ -183,7 +184,7 @@ async def upload_task(
         shutil.rmtree(task_dir, ignore_errors=True)
         raise
     title = re.sub(r"\.[^.]+$", "", video.filename or "本地视频")[:300]
-    task = Task(id=task_id, user_id=user.id, title=title, source_type="file", media_path=str(media_path), language=language, asr_provider=settings.asr_provider)
+    task = Task(id=task_id, user_id=user.id, title=title, source_type="file", media_path=str(media_path), language=language, asr_provider=provider_config()["asr_provider"])
     db.add(task)
     db.commit()
     enqueue(transcribe_task, task.id)
@@ -198,7 +199,7 @@ def url_task(body: UrlBody, user: User = Depends(current_user), db: Session = De
         raise HTTPException(400, str(exc))
     task_id = str(uuid.uuid4())
     (settings.data_dir / "tasks" / task_id).mkdir(parents=True, exist_ok=False)
-    task = Task(id=task_id, user_id=user.id, title="网络视频", source_type="url", source_url=url, language="auto", asr_provider=settings.asr_provider)
+    task = Task(id=task_id, user_id=user.id, title="网络视频", source_type="url", source_url=url, language="auto", asr_provider=provider_config()["asr_provider"])
     db.add(task)
     db.commit()
     enqueue(transcribe_task, task.id)
@@ -260,7 +261,9 @@ def media(task_id: str, user: User = Depends(current_user), db: Session = Depend
     task = owned_task(task_id, user, db)
     if not task.media_path or not Path(task.media_path).exists():
         raise HTTPException(404, "原视频已删除")
-    return FileResponse(task.media_path)
+    source = Path(task.media_path)
+    preview = source.parent / "preview.mp4"
+    return FileResponse(preview if preview.exists() else source)
 
 
 @app.get("/api/tasks/{task_id}/export/{kind}")

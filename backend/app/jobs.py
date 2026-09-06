@@ -8,7 +8,7 @@ from .database import SessionLocal
 from .models import Task, utcnow
 from .services.asr import ASRClient
 from .services.llm import find_highlights, rewrite_script
-from .services.media import download_video, probe_duration, split_audio
+from .services.media import download_video, ensure_browser_preview, probe_duration, split_audio
 
 
 def _update(db, task: Task, **values):
@@ -34,9 +34,17 @@ def transcribe_task(task_id: str):
             else:
                 media_path = Path(task.media_path or "")
             duration = probe_duration(media_path)
+            _update(db, task, progress=10, message="正在生成浏览器预览")
+            try:
+                ensure_browser_preview(media_path, task_dir)
+            except Exception:
+                # Preview compatibility must not prevent transcription.
+                pass
             _update(db, task, duration=duration, progress=14, message="正在提取音频")
             chunks = split_audio(media_path, task_dir, settings.asr_chunk_seconds)
             client = ASRClient()
+            task.asr_provider = client.config["asr_provider"]
+            db.commit()
             segments = []
             text_parts = []
             for index, chunk in enumerate(chunks):
@@ -44,9 +52,22 @@ def transcribe_task(task_id: str):
                 end_s = min(duration, (index + 1) * settings.asr_chunk_seconds)
                 pct = 18 + int((index / len(chunks)) * 76)
                 _update(db, task, status="transcribing", progress=pct, message=f"正在听写第 {index + 1}/{len(chunks)} 段")
-                text = client.transcribe(chunk)
+                result = client.transcribe(chunk)
+                text = result["text"]
                 if text:
-                    segments.append({"start": _clock(start_s), "end": _clock(end_s), "start_seconds": start_s, "end_seconds": end_s, "text": text})
+                    detailed = result.get("segments") or []
+                    if detailed:
+                        for item in detailed:
+                            item_start = min(duration, start_s + max(0.0, item["start_seconds"]))
+                            item_end = min(duration, start_s + max(item["start_seconds"], item["end_seconds"]))
+                            if item_end > item_start:
+                                segments.append({
+                                    "start": _clock(item_start), "end": _clock(item_end),
+                                    "start_seconds": item_start, "end_seconds": item_end,
+                                    "text": item["text"],
+                                })
+                    else:
+                        segments.append({"start": _clock(start_s), "end": _clock(end_s), "start_seconds": start_s, "end_seconds": end_s, "text": text})
                     text_parts.append(text)
             if not text_parts:
                 raise RuntimeError("没有识别到可用的语音内容")

@@ -9,7 +9,7 @@ from .database import SessionLocal
 from .models import AppSetting
 
 
-SECRET_KEYS = {"mimo_api_key", "custom_asr_api_key", "sub2api_api_key"}
+SECRET_KEYS = {"mimo_api_key", "custom_asr_api_key", "sub2api_api_key", "sub2api_fallback_api_key"}
 
 
 def _fernet() -> Fernet:
@@ -40,6 +40,7 @@ def provider_config() -> dict:
         "custom_asr_model": settings.custom_asr_model,
         "sub2api_base_url": settings.sub2api_base_url,
         "sub2api_api_key": settings.sub2api_api_key,
+        "sub2api_fallback_api_key": settings.sub2api_fallback_api_key,
         "llm_primary_model": settings.llm_primary_model,
         "llm_fallback_model": settings.llm_fallback_model,
     }
@@ -54,7 +55,7 @@ def update_provider_config(values: dict) -> dict:
     allowed = {
         "asr_provider", "mimo_api_key", "mimo_base_url", "mimo_model", "asr_language",
         "custom_asr_base_url", "custom_asr_api_key", "custom_asr_model",
-        "sub2api_base_url", "sub2api_api_key", "llm_primary_model", "llm_fallback_model",
+        "sub2api_base_url", "sub2api_api_key", "sub2api_fallback_api_key", "llm_primary_model", "llm_fallback_model",
     }
     with SessionLocal() as db:
         for key, raw_value in values.items():
@@ -88,7 +89,7 @@ def public_provider_config() -> dict:
         "custom_asr_api_key_configured": bool(cfg["custom_asr_api_key"]),
         "sub2api_base_url": cfg["sub2api_base_url"],
         "sub2api_api_key_configured": bool(cfg["sub2api_api_key"]),
+        "sub2api_fallback_api_key_configured": bool(cfg["sub2api_fallback_api_key"]),
         "llm_primary_model": cfg["llm_primary_model"],
         "llm_fallback_model": cfg["llm_fallback_model"],
     }
-

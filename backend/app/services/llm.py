@@ -10,18 +10,25 @@ def _call(messages: list[dict]) -> str:
     cfg = provider_config()
     if not cfg["sub2api_base_url"] or not cfg["sub2api_api_key"]:
         raise RuntimeError("服务器尚未配置 Sub2API")
-    last_error = ""
-    for model in (cfg["llm_primary_model"], cfg["llm_fallback_model"]):
+    errors = []
+    providers = (
+        (cfg["llm_primary_model"], cfg["sub2api_api_key"]),
+        (cfg["llm_fallback_model"], cfg["sub2api_fallback_api_key"] or cfg["sub2api_api_key"]),
+    )
+    for model, api_key in providers:
         response = requests.post(
             f"{cfg['sub2api_base_url'].rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {cfg['sub2api_api_key']}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"model": model, "messages": messages, "temperature": 0.35},
             timeout=240,
         )
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
-        last_error = f"{model}: {response.status_code} {response.text[:300]}"
-    raise RuntimeError(f"Gemini 与 GPT 均调用失败：{last_error}")
+        errors.append(f"{model}: {response.status_code} {response.text[:300]}")
+    joined = "；".join(errors)
+    if "INSUFFICIENT_BALANCE" in joined:
+        raise RuntimeError("Sub2API API Key 余额不足。后台账号测试成功不等于 API Key 有额度，请为该 Key 所属用户充值内部余额或分配有效订阅。")
+    raise RuntimeError(f"首选与备用模型均调用失败：{joined}")
 
 
 def _json(text: str):

@@ -209,7 +209,7 @@ function SettingsPage({ onBack }) {
     event.preventDefault(); setBusy(true); setMessage(''); setError('')
     try {
       const payload = {...form}
-      delete payload.mimo_api_key_configured; delete payload.custom_asr_api_key_configured; delete payload.sub2api_api_key_configured
+      delete payload.mimo_api_key_configured; delete payload.custom_asr_api_key_configured; delete payload.sub2api_api_key_configured; delete payload.sub2api_fallback_api_key_configured
       setForm(await api.saveProviderSettings(payload)); setMessage('接口设置已安全保存，新任务会立即使用。')
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
@@ -246,6 +246,7 @@ function SettingsPage({ onBack }) {
           <label>Sub2API API Key<input type="password" value={form.sub2api_api_key || ''} onChange={e => set('sub2api_api_key', e.target.value)} placeholder={form.sub2api_api_key_configured ? '已配置，留空保持不变' : '请输入专用 API Key'}/></label>
           <label>首选模型<input value={form.llm_primary_model} onChange={e => set('llm_primary_model', e.target.value)} placeholder="Gemini 模型名"/></label>
           <label>备用模型<input value={form.llm_fallback_model} onChange={e => set('llm_fallback_model', e.target.value)} placeholder="GPT 模型名"/></label>
+          <label className="wide">备用 Sub2API API Key（可选）<input type="password" value={form.sub2api_fallback_api_key || ''} onChange={e => set('sub2api_fallback_api_key', e.target.value)} placeholder={form.sub2api_fallback_api_key_configured ? '已配置，留空保持不变' : 'GPT 若属于其他分组，请填写绑定 OpenAI 分组的 Key'}/></label>
         </div>
       </section>
       <section><div className="settings-section-title"><h2>登录安全</h2><p>首次部署后请立即修改临时管理员密码。</p></div>
@@ -277,7 +278,7 @@ function App() {
     {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>历史记录</h1><p>你的听写、亮点与改编结果都保存在这里。</p></div></div><TaskTable tasks={tasks} onOpen={open} full/></main>}
     {page === 'settings' && <SettingsPage onBack={() => setPage('home')}/>} 
     {page === 'detail' && selected && <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} onSettings={() => setPage('settings')}/>} 
-    <footer className="statusbar"><span><span className="footer-wave"><i/><i/><i/></span><i className="online"/>MiMo-V2.5-ASR</span><span><LockKeyhole size={15}/>仅你可访问</span></footer>
+    <footer className="statusbar"><span><span className="footer-wave"><i/><i/><i/></span><i className="online"/>ASR 服务在线</span><span><LockKeyhole size={15}/>仅你可访问</span></footer>
   </div>
 }
 
