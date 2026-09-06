@@ -19,12 +19,16 @@ class Settings:
     admin_password: str = os.getenv("ADMIN_PASSWORD", "change-me")
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "2048"))
     source_retention_hours: int = int(os.getenv("SOURCE_RETENTION_HOURS", "24"))
+    job_timeout_seconds: int = int(os.getenv("JOB_TIMEOUT_SECONDS", str(6 * 3600)))
     asr_provider: str = os.getenv("ASR_PROVIDER", "mimo")
     mimo_api_key: str = os.getenv("MIMO_API_KEY", "")
     mimo_base_url: str = os.getenv("MIMO_BASE_URL", "https://api.xiaomimimo.com/v1")
     mimo_model: str = os.getenv("MIMO_MODEL", "mimo-v2.5-asr")
     asr_language: str = os.getenv("ASR_LANGUAGE", "auto")
-    asr_chunk_seconds: int = int(os.getenv("ASR_CHUNK_SECONDS", "45"))
+    # Three-minute chunks are a better default for OpenAI-compatible ASR
+    # providers while remaining comfortably below MiMo's payload limit.
+    asr_chunk_seconds: int = int(os.getenv("ASR_CHUNK_SECONDS", "180"))
+    url_audio_only_minutes: int = int(os.getenv("URL_AUDIO_ONLY_MINUTES", "45"))
     custom_asr_base_url: str = os.getenv("CUSTOM_ASR_BASE_URL", "")
     custom_asr_api_key: str = os.getenv("CUSTOM_ASR_API_KEY", "")
     custom_asr_model: str = os.getenv("CUSTOM_ASR_MODEL", "whisper-1")

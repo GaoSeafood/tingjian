@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ArrowLeft, Check, ChevronRight, Clock3, Copy, Download, FileVideo, Film,
+  ArrowLeft, Check, ChevronRight, Clock3, Copy, Download, FileAudio, FileVideo, Film,
   History, Link2, LoaderCircle, LockKeyhole, LogOut, PencilLine,
   Play, RotateCcw, Search, Sparkles, Trash2, Upload, UserRound, Volume2, WandSparkles,
   SlidersHorizontal, Save,
@@ -72,7 +72,7 @@ function TaskTable({ tasks, onOpen, onDelete, full = false }) {
       {tasks.length === 0 && <div className="empty">还没有听写记录，先上传一个视频吧。</div>}
       {tasks.map(task => <div className="task-row" role="button" tabIndex="0" key={task.id}
         onClick={() => onOpen(task.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(task.id) }}>
-        <span className="task-name"><FileVideo size={21}/><b>{task.title}</b></span>
+        <span className="task-name">{task.media_kind === 'audio' ? <FileAudio size={21}/> : <FileVideo size={21}/>}<b>{task.title}</b></span>
         <span>{task.source_type === 'url' ? '视频链接' : '本地文件'}</span>
         <span>{clock(task.duration)}</span><StatusMark task={task}/>
         <span>{friendlyDate(task.created_at)}</span>
@@ -110,25 +110,28 @@ function Home({ tasks, refresh, onOpen }) {
     {mode === 'file' ? <div className={`dropzone ${drag ? 'drag' : ''} ${file ? 'has-file' : ''}`}
       onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       onDrop={e => { e.preventDefault(); setDrag(false); choose(e.dataTransfer.files[0]) }} onClick={() => inputRef.current?.click()}>
-      <input ref={inputRef} type="file" accept="video/*" hidden onChange={e => choose(e.target.files[0])}/>
-      {file ? <><FileVideo size={54}/><h3>{file.name}</h3><p>{fileSize(file.size)} · 点击重新选择</p></> : <><Upload size={58}/><h3>拖入视频，或点击选择文件</h3><p>MP4、MOV、MKV、WebM，单个文件最大 2GB</p></>}
+      <input ref={inputRef} type="file" accept="video/*,audio/*" hidden onChange={e => choose(e.target.files[0])}/>
+      {file ? <>{file.type.startsWith('audio/') ? <FileAudio size={54}/> : <FileVideo size={54}/>}<h3>{file.name}</h3><p>{fileSize(file.size)} · 点击重新选择</p></> : <><Upload size={58}/><h3>拖入视频或音频，或点击选择文件</h3><p>MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB</p></>}
     </div> : <div className="urlbox"><Link2 size={44}/><div><h3>粘贴公开视频链接</h3><p>支持直接链接，也支持整段分享文案，系统会自动提取其中的视频链接</p></div><input value={url} onChange={e => setUrl(e.target.value)} placeholder="粘贴链接或整段分享文案…" /></div>}
     <div className="submit-row"><button className="primary" disabled={busy || (mode === 'file' ? !file : !url.trim())} onClick={submit}>
       {busy ? <LoaderCircle className="spin" size={20}/> : <span className="mini-wave"><i/><i/><i/></span>}开始听写
-    </button><span>{busy ? '正在上传并创建任务…' : '只进行语音听写，不会自动调用 AI。'}</span></div>
+    </button><span>{busy ? '正在上传并创建任务…' : '只进行语音听写，不会自动调用 AI；长视频会自动切换为音频模式。'}</span></div>
     {error && <div className="error-line spacious">{error}</div>}
     <TaskTable tasks={tasks.slice(0, 5)} onOpen={onOpen}/>
   </main>
 }
 
-function TranscriptRows({ segments, onChange, onSeek }) {
-  return <div className="transcript-list">
-    {segments.map((segment, index) => <div className="transcript-row" key={`${segment.start}-${index}`}>
-      <button className="time" onClick={() => onSeek(segment.start_seconds)}>{segment.start}</button>
-      <textarea value={segment.text} rows={Math.max(1, Math.ceil(segment.text.length / 40))}
-        onChange={e => onChange(segment._index, e.target.value)}/>
-    </div>)}
-  </div>
+function TranscriptEditor({ segments, showTimes, onChange }) {
+  const value = segments.map(segment => showTimes ? `[${segment.start}] ${segment.text}` : segment.text).join('\n')
+  const edit = event => {
+    const lines = event.target.value.split(/\r?\n/)
+    onChange(lines.map((line, index) => {
+      const base = segments[index] || { start: '', end: '', start_seconds: 0, end_seconds: 0 }
+      const text = showTimes ? line.replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, '') : line
+      return {...base, text}
+    }))
+  }
+  return <div className="transcript-editor"><textarea value={value} onChange={edit} spellCheck="false" placeholder="听写内容会显示在这里…" /></div>
 }
 
 function HighlightResults({ items }) {
@@ -159,7 +162,6 @@ function Detail({ taskId, onBack, onSettings }) {
     if (!task || (task.status === 'completed' && ['idle','failed'].includes(task.ai_status)) || task.status === 'failed') return
     const timer = setInterval(() => load().catch(console.error), 1800); return () => clearInterval(timer)
   }, [task, load])
-  const updateSegments = (next) => { setSegments(next); setDirty(true) }
   const save = async () => { setTask(await api.saveTranscript(taskId, segments)); setDirty(false); setNotice('已保存修改') }
   const startHighlights = async () => {
     setAction('highlights'); setNotice('')
@@ -171,13 +173,20 @@ function Detail({ taskId, onBack, onSettings }) {
     try { await api.rewrite(taskId, direction); await load() }
     catch (err) { setAction('rewrite'); setNotice(err.message) }
   }
-  const seek = (seconds) => { if (mediaRef.current) { mediaRef.current.currentTime = seconds; mediaRef.current.play() } }
   if (!task) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
   if (task.status !== 'completed') return <main className="processing shell"><button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button><div className="processing-center">
     {task.status === 'failed' ? <><span className="process-icon failed"><RotateCcw/></span><h1>听写失败</h1><p>{task.error}</p></> : <><span className="process-icon"><LoaderCircle className="spin"/></span><h1>{task.message}</h1><p>{task.title}</p><div className="big-progress"><i style={{width: `${task.progress}%`}}/></div><b>{task.progress}%</b></>}
   </div></main>
   const visible = segments.map((item, index) => ({...item, _index: index}))
     .filter(item => !search || item.text.toLowerCase().includes(search.toLowerCase()))
+  const updateVisible = next => {
+    const indexes = visible.map(item => item._index)
+    setSegments(current => current.map((item, index) => {
+      const visibleIndex = indexes.indexOf(index)
+      return visibleIndex >= 0 && next[visibleIndex] ? {...item, text: next[visibleIndex].text} : item
+    }))
+    setDirty(true)
+  }
   const running = !['idle','failed'].includes(task.ai_status)
   return <main className="detail shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
@@ -192,8 +201,8 @@ function Detail({ taskId, onBack, onSettings }) {
           <a className="outline compact" href={`/api/tasks/${task.id}/export/srt`}><Download size={17}/>SRT</a>
           {dirty && <button className="primary compact" onClick={save}>保存修改</button>}
         </div>
-        <TranscriptRows segments={visible} onChange={(index, text) => updateSegments(segments.map((item, i) => i === index ? {...item, text} : item))} onSeek={seek}/>
-        {task.source_available ? <video ref={mediaRef} className="media-player" controls src={`/api/tasks/${task.id}/media`} /> : <div className="media-missing">原视频已按策略删除，听写稿仍会保留。</div>}
+        <TranscriptEditor segments={visible} showTimes={showTimes} onChange={updateVisible}/>
+        {task.source_available ? task.media_kind === 'audio' ? <audio ref={mediaRef} className="media-player audio-player" controls src={`/api/tasks/${task.id}/media`} /> : <video ref={mediaRef} className="media-player" controls src={`/api/tasks/${task.id}/media`} /> : <div className="media-missing">原媒体已按策略删除，听写稿仍会保留。</div>}
       </section>
       <aside className="next-pane">
         <div><h2>下一步</h2><p>听写已完成。需要时再调用 AI，不会自动消耗额度。</p></div>

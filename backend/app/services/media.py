@@ -1,8 +1,8 @@
-import ipaddress
 import html
+import ipaddress
 import json
-import re
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -19,6 +19,8 @@ ALLOWED_HOST_SUFFIXES = (
     "youtu.be", "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn",
     "tiktok.com", "instagram.com", "twitter.com", "x.com",
 )
+AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 DIRECT_MEDIA_HOST_SUFFIXES = (
     "qq.com", "qpic.cn", "qlogo.cn", "weixin.qq.com", "wechat.com",
 )
@@ -62,29 +64,45 @@ def validate_public_url(url: str) -> str:
     return url.strip()
 
 
-def download_video(url: str, task_dir: Path) -> tuple[Path, str]:
+def media_kind(path: str | Path | None) -> str:
+    return "audio" if path and Path(path).suffix.lower() in AUDIO_SUFFIXES else "video"
+
+
+def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool]:
+    normalized_url = validate_public_url(url)
+    audio_only = False
+    try:
+        with yt_dlp.YoutubeDL({"noplaylist": True, "quiet": True, "socket_timeout": 30}) as ydl:
+            info = ydl.extract_info(normalized_url, download=False)
+            duration = float(info.get("duration") or 0)
+            audio_only = duration >= settings.url_audio_only_minutes * 60
+    except Exception:
+        # The download pass below provides the real error message. Metadata
+        # lookup is only a hint used to avoid downloading a huge video.
+        pass
     output = str(task_dir / "source.%(ext)s")
     opts = {
         "outtmpl": output,
-        "format": "bv*+ba/b",
-        "merge_output_format": "mp4",
+        "format": "bestaudio/best" if audio_only else "bv*+ba/b",
         "noplaylist": True,
         "max_filesize": settings.max_upload_mb * 1024 * 1024,
         "socket_timeout": 30,
         "retries": 3,
         "quiet": True,
     }
+    if not audio_only:
+        opts["merge_output_format"] = "mp4"
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(validate_public_url(url), download=True)
+        info = ydl.extract_info(normalized_url, download=True)
         title = info.get("title") or "网络视频"
         requested = info.get("requested_downloads") or []
         candidate = requested[0].get("filepath") if requested else None
     if candidate and Path(candidate).exists():
-        return Path(candidate), title
+        return Path(candidate), title, audio_only
     matches = sorted(task_dir.glob("source.*"))
     if not matches:
         raise RuntimeError("视频下载完成后未找到文件")
-    return matches[0], title
+    return matches[0], title, audio_only
 
 
 def probe_duration(path: Path) -> float:

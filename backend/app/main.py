@@ -18,7 +18,7 @@ from .database import Base, engine, get_db
 from .jobs import highlight_task, rewrite_task, transcribe_task
 from .models import Task, User
 from .provider_config import provider_config, public_provider_config, update_provider_config
-from .services.media import delete_source, extract_video_url
+from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, delete_source, extract_video_url, media_kind
 from .worker import enqueue
 
 
@@ -77,6 +77,7 @@ def task_dict(task: Task, detail: bool = False):
         "progress": task.progress, "message": task.message, "error": task.error,
         "asr_provider": task.asr_provider, "ai_status": task.ai_status,
         "ai_message": task.ai_message, "source_available": bool(task.media_path),
+        "media_kind": media_kind(task.media_path),
         "source_delete_at": task.source_delete_at.isoformat() if task.source_delete_at else None,
         "created_at": task.created_at.isoformat(), "updated_at": task.updated_at.isoformat(),
     }
@@ -167,9 +168,18 @@ async def upload_task(
     task_dir = settings.data_dir / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=False)
     suffix = Path(video.filename or "video.mp4").suffix.lower() or ".mp4"
-    if suffix not in {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}:
+    content_type = (video.content_type or "").lower()
+    if suffix not in VIDEO_SUFFIXES | AUDIO_SUFFIXES:
+        if content_type.startswith("audio/"):
+            suffix = ".mp3"
+        elif content_type.startswith("video/"):
+            suffix = ".mp4"
+        else:
+            shutil.rmtree(task_dir, ignore_errors=True)
+            raise HTTPException(400, "不支持这种视频或音频格式")
+    if suffix not in VIDEO_SUFFIXES | AUDIO_SUFFIXES:
         shutil.rmtree(task_dir, ignore_errors=True)
-        raise HTTPException(400, "不支持这种视频格式")
+        raise HTTPException(400, "不支持这种视频或音频格式")
     media_path = task_dir / f"source{suffix}"
     max_bytes = settings.max_upload_mb * 1024 * 1024
     written = 0

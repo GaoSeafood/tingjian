@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+import shutil
 
 from sqlalchemy import select
 
@@ -8,7 +9,7 @@ from .database import SessionLocal
 from .models import Task, utcnow
 from .services.asr import ASRClient
 from .services.llm import find_highlights, rewrite_script
-from .services.media import download_video, ensure_browser_preview, probe_duration, split_audio
+from .services.media import download_video, ensure_browser_preview, media_kind, probe_duration, split_audio
 
 
 def _update(db, task: Task, **values):
@@ -23,6 +24,14 @@ def _update(db, task: Task, **values):
     db.commit()
 
 
+def _schedule_cleanup(task_id: str, delay: timedelta):
+    from .worker import queue
+    queue.enqueue_in(
+        delay, cleanup_source_task, task_id,
+        job_timeout=300, result_ttl=3600,
+    )
+
+
 def transcribe_task(task_id: str):
     with SessionLocal() as db:
         task = db.get(Task, task_id)
@@ -31,21 +40,29 @@ def transcribe_task(task_id: str):
         task_dir = settings.data_dir / "tasks" / task.id
         try:
             _update(db, task, status="preparing", progress=5, message="正在准备视频", error=None)
+            audio_only = False
             if task.source_type == "url":
                 _update(db, task, status="downloading", progress=8, message="正在下载视频")
-                media_path, title = download_video(task.source_url or "", task_dir)
+                media_path, title, audio_only = download_video(task.source_url or "", task_dir)
                 task.media_path, task.title = str(media_path), title
                 db.commit()
             else:
                 media_path = Path(task.media_path or "")
             duration = probe_duration(media_path)
-            _update(db, task, progress=10, message="正在生成浏览器预览")
-            try:
-                ensure_browser_preview(media_path, task_dir)
-            except Exception:
-                # Preview compatibility must not prevent transcription.
-                pass
-            _update(db, task, duration=duration, progress=14, message="正在提取音频")
+            long_media = duration >= settings.url_audio_only_minutes * 60
+            if audio_only or media_kind(media_path) == "audio":
+                _update(db, task, progress=10, message="长视频已切换为音频听写模式")
+            elif long_media:
+                _update(db, task, progress=10, message="长视频跳过预览，直接提取音频")
+            else:
+                _update(db, task, progress=10, message="正在生成浏览器预览")
+                try:
+                    ensure_browser_preview(media_path, task_dir)
+                except Exception:
+                    # Preview compatibility must not prevent transcription.
+                    pass
+            extraction_message = "正在提取音频（长视频模式）" if audio_only or long_media or media_kind(media_path) == "audio" else "正在提取音频"
+            _update(db, task, duration=duration, progress=14, message=extraction_message)
             chunks = split_audio(media_path, task_dir, settings.asr_chunk_seconds)
             client = ASRClient()
             task.asr_provider = client.config["asr_provider"]
@@ -81,13 +98,16 @@ def transcribe_task(task_id: str):
                 transcript_text="\n".join(text_parts), segments=segments,
                 source_delete_at=utcnow() + timedelta(hours=settings.source_retention_hours),
             )
-            from .worker import queue
-            queue.enqueue_in(
-                timedelta(hours=settings.source_retention_hours), cleanup_source_task, task.id,
-                job_timeout=300, result_ttl=3600,
-            )
+            _schedule_cleanup(task.id, timedelta(hours=settings.source_retention_hours))
         except Exception as exc:
-            _update(db, task, status="failed", message="听写失败", error=str(exc))
+            deadline = utcnow() + timedelta(hours=settings.source_retention_hours)
+            _update(db, task, status="failed", message="听写失败", error=str(exc), source_delete_at=deadline)
+            try:
+                _schedule_cleanup(task.id, timedelta(hours=settings.source_retention_hours))
+            except Exception:
+                # The failed task remains visible for manual cleanup if the
+                # scheduler is temporarily unavailable.
+                pass
 
 
 def highlight_task(task_id: str):
@@ -124,6 +144,7 @@ def cleanup_expired_sources():
         for task in tasks:
             from .services.media import delete_source
             delete_source(task.media_path)
+            shutil.rmtree(settings.data_dir / "tasks" / task.id, ignore_errors=True)
             task.media_path = None
         db.commit()
 
@@ -135,6 +156,7 @@ def cleanup_source_task(task_id: str):
             return
         from .services.media import delete_source
         delete_source(task.media_path)
+        shutil.rmtree(settings.data_dir / "tasks" / task.id, ignore_errors=True)
         task.media_path = None
         task.source_delete_at = None
         db.commit()
