@@ -12,6 +12,11 @@ from .services.media import download_video, ensure_browser_preview, probe_durati
 
 
 def _update(db, task: Task, **values):
+    # UI status fields are intentionally short; never let a provider's verbose
+    # error response prevent the worker from recording the failed state.
+    for key in ("message", "ai_message"):
+        if key in values and values[key] is not None:
+            values[key] = str(values[key])[:300]
     for key, value in values.items():
         setattr(task, key, value)
     task.updated_at = utcnow()
@@ -95,6 +100,7 @@ def highlight_task(task_id: str):
             highlights = find_highlights(task.title, task.segments or [])
             _update(db, task, highlights=highlights, ai_status="idle", ai_message="亮点分析完成")
         except Exception as exc:
+            db.rollback()
             _update(db, task, ai_status="failed", ai_message=str(exc))
 
 
@@ -108,6 +114,7 @@ def rewrite_task(task_id: str, direction: str):
             result = rewrite_script(task.title, task.transcript_text or "", direction)
             _update(db, task, rewrite_text=result, ai_status="idle", ai_message="改编完成")
         except Exception as exc:
+            db.rollback()
             _update(db, task, ai_status="failed", ai_message=str(exc))
 
 

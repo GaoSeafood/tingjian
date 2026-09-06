@@ -154,8 +154,16 @@ function Detail({ taskId, onBack, onSettings }) {
   }, [task, load])
   const updateSegments = (next) => { setSegments(next); setDirty(true) }
   const save = async () => { setTask(await api.saveTranscript(taskId, segments)); setDirty(false); setNotice('已保存修改') }
-  const startHighlights = async () => { setAction('highlights'); await api.highlights(taskId); await load() }
-  const startRewrite = async () => { setAction('rewrite'); await api.rewrite(taskId, direction); await load() }
+  const startHighlights = async () => {
+    setAction('highlights'); setNotice('')
+    try { await api.highlights(taskId); await load() }
+    catch (err) { setAction(null); setNotice(err.message) }
+  }
+  const startRewrite = async () => {
+    setAction('rewrite'); setNotice('')
+    try { await api.rewrite(taskId, direction); await load() }
+    catch (err) { setAction('rewrite'); setNotice(err.message) }
+  }
   const seek = (seconds) => { if (mediaRef.current) { mediaRef.current.currentTime = seconds; mediaRef.current.play() } }
   if (!task) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
   if (task.status !== 'completed') return <main className="processing shell"><button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button><div className="processing-center">

@@ -16,18 +16,35 @@ def _call(messages: list[dict]) -> str:
         (cfg["llm_fallback_model"], cfg["sub2api_fallback_api_key"] or cfg["sub2api_api_key"]),
     )
     for model, api_key in providers:
-        response = requests.post(
-            f"{cfg['sub2api_base_url'].rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": messages, "temperature": 0.35},
-            timeout=240,
-        )
+        if not model:
+            errors.append("未配置模型")
+            continue
+        try:
+            response = requests.post(
+                f"{cfg['sub2api_base_url'].rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": messages, "temperature": 0.35},
+                timeout=(10, 120),
+            )
+        except requests.RequestException as exc:
+            errors.append(f"{model}: 请求超时或网络错误（{str(exc)[:120]}）")
+            continue
         if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        errors.append(f"{model}: {response.status_code} {response.text[:300]}")
+            try:
+                return response.json()["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                errors.append(f"{model}: 返回格式异常（{exc}）")
+                continue
+        try:
+            detail = response.json().get("error", {}).get("message", "")
+        except ValueError:
+            detail = response.text
+        errors.append(f"{model}: {response.status_code} {detail[:180]}")
     joined = "；".join(errors)
     if "INSUFFICIENT_BALANCE" in joined:
         raise RuntimeError("Sub2API API Key 余额不足。后台账号测试成功不等于 API Key 有额度，请为该 Key 所属用户充值内部余额或分配有效订阅。")
+    if "model_not_found" in joined or "模型" in joined and "supported" in joined:
+        raise RuntimeError(f"Sub2API 模型不可用，请在对应分组中确认模型名称：{joined}")
     raise RuntimeError(f"首选与备用模型均调用失败：{joined}")
 
 
