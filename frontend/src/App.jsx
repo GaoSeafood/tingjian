@@ -59,18 +59,25 @@ function StatusMark({ task }) {
   return <span className="status"><Clock3 size={15}/>{STATUS[task.status] || task.status}</span>
 }
 
-function TaskTable({ tasks, onOpen, full = false }) {
+function TaskTable({ tasks, onOpen, onDelete, full = false }) {
+  const remove = async (event, task) => {
+    event.stopPropagation()
+    if (!window.confirm(`确定删除“${task.title}”这条历史记录吗？听写稿、亮点和改写结果都会删除。`)) return
+    try { await onDelete(task.id) } catch (err) { window.alert(err.message) }
+  }
   return <section className={`recent ${full ? 'history-list' : ''}`}>
     <div className="section-title"><h2>{full ? '全部听写记录' : '最近听写'}</h2>{full && <span>{tasks.length} 条记录</span>}</div>
     <div className="task-table">
       <div className="task-head"><span>标题</span><span>来源</span><span>时长</span><span>状态</span><span>时间</span><span/></div>
       {tasks.length === 0 && <div className="empty">还没有听写记录，先上传一个视频吧。</div>}
-      {tasks.map(task => <button className="task-row" key={task.id} onClick={() => onOpen(task.id)}>
+      {tasks.map(task => <div className="task-row" role="button" tabIndex="0" key={task.id}
+        onClick={() => onOpen(task.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(task.id) }}>
         <span className="task-name"><FileVideo size={21}/><b>{task.title}</b></span>
         <span>{task.source_type === 'url' ? '视频链接' : '本地文件'}</span>
         <span>{clock(task.duration)}</span><StatusMark task={task}/>
-        <span>{friendlyDate(task.created_at)}</span><ChevronRight size={18}/>
-      </button>)}
+        <span>{friendlyDate(task.created_at)}</span>
+        <span className="task-actions">{onDelete && <button className="task-delete" aria-label={`删除${task.title}`} onClick={event => remove(event, task)}><Trash2 size={16}/></button>}<ChevronRight size={18}/></span>
+      </div>)}
     </div>
   </section>
 }
@@ -105,7 +112,7 @@ function Home({ tasks, refresh, onOpen }) {
       onDrop={e => { e.preventDefault(); setDrag(false); choose(e.dataTransfer.files[0]) }} onClick={() => inputRef.current?.click()}>
       <input ref={inputRef} type="file" accept="video/*" hidden onChange={e => choose(e.target.files[0])}/>
       {file ? <><FileVideo size={54}/><h3>{file.name}</h3><p>{fileSize(file.size)} · 点击重新选择</p></> : <><Upload size={58}/><h3>拖入视频，或点击选择文件</h3><p>MP4、MOV、MKV、WebM，单个文件最大 2GB</p></>}
-    </div> : <div className="urlbox"><Link2 size={44}/><div><h3>粘贴公开视频链接</h3><p>支持 B站、抖音、YouTube、小红书、微博等平台</p></div><input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..." /></div>}
+    </div> : <div className="urlbox"><Link2 size={44}/><div><h3>粘贴公开视频链接</h3><p>支持直接链接，也支持整段分享文案，系统会自动提取其中的视频链接</p></div><input value={url} onChange={e => setUrl(e.target.value)} placeholder="粘贴链接或整段分享文案…" /></div>}
     <div className="submit-row"><button className="primary" disabled={busy || (mode === 'file' ? !file : !url.trim())} onClick={submit}>
       {busy ? <LoaderCircle className="spin" size={20}/> : <span className="mini-wave"><i/><i/><i/></span>}开始听写
     </button><span>{busy ? '正在上传并创建任务…' : '只进行语音听写，不会自动调用 AI。'}</span></div>
@@ -273,6 +280,11 @@ function App() {
   const [tasks, setTasks] = useState([])
   const [selected, setSelected] = useState(null)
   const refresh = useCallback(async () => { const items = await api.tasks(); setTasks(items); return items }, [])
+  const removeTask = useCallback(async (taskId) => {
+    await api.deleteTask(taskId)
+    setTasks(current => current.filter(task => task.id !== taskId))
+    if (selected === taskId) { setSelected(null); setPage('history') }
+  }, [selected])
   useEffect(() => { api.me().then(async me => { setUser(me); await refresh() }).catch(() => setUser(null)) }, [refresh])
   useEffect(() => {
     if (!user || !tasks.some(t => !['completed','failed'].includes(t.status))) return
@@ -283,7 +295,7 @@ function App() {
   const open = id => { setSelected(id); setPage('detail') }
   return <div className="app"><Header page={page} setPage={setPage} user={user} onLogout={async () => { await api.logout(); setUser(null) }}/>
     {page === 'home' && <Home tasks={tasks} refresh={refresh} onOpen={open}/>} 
-    {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>历史记录</h1><p>你的听写、亮点与改编结果都保存在这里。</p></div></div><TaskTable tasks={tasks} onOpen={open} full/></main>}
+    {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>历史记录</h1><p>你的听写、亮点与改编结果都保存在这里。</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full/></main>}
     {page === 'settings' && <SettingsPage onBack={() => setPage('home')}/>} 
     {page === 'detail' && selected && <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} onSettings={() => setPage('settings')}/>} 
     <footer className="statusbar"><span><span className="footer-wave"><i/><i/><i/></span><i className="online"/>ASR 服务在线</span><span><LockKeyhole size={15}/>仅你可访问</span></footer>

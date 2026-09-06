@@ -42,4 +42,5 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
   }),
   deleteSource: (id) => request(`/api/tasks/${id}/source`, { method: 'DELETE' }),
+  deleteTask: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
 }

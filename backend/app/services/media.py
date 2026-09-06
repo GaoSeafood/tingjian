@@ -1,5 +1,7 @@
 import ipaddress
+import html
 import json
+import re
 import os
 import shutil
 import socket
@@ -17,6 +19,27 @@ ALLOWED_HOST_SUFFIXES = (
     "youtu.be", "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn",
     "tiktok.com", "instagram.com", "twitter.com", "x.com",
 )
+DIRECT_MEDIA_HOST_SUFFIXES = (
+    "qq.com", "qpic.cn", "qlogo.cn", "weixin.qq.com", "wechat.com",
+)
+MARKDOWN_URL_RE = re.compile(r"\]\((https?://[^)\s]+)\)", re.IGNORECASE)
+URL_CANDIDATE_RE = re.compile(r"https?://[^\s<>\"'`\[\]()]+", re.IGNORECASE)
+
+
+def extract_video_url(value: str) -> str:
+    """Extract the first supported video URL from a pasted share message."""
+    text = html.unescape(value or "")
+    candidates = MARKDOWN_URL_RE.findall(text) + URL_CANDIDATE_RE.findall(text)
+    for raw in candidates:
+        # Shared Markdown copied from chat apps often escapes &, _, or other
+        # URL characters with a backslash. Those escapes are not part of URL.
+        candidate = raw.replace("\\", "")
+        candidate = candidate.rstrip(".,!?;:，。！？；：)]}》」』")
+        try:
+            return validate_public_url(candidate)
+        except ValueError:
+            continue
+    raise ValueError("未找到可用的视频链接，请粘贴视频链接或包含视频链接的分享文案")
 
 
 def validate_public_url(url: str) -> str:
@@ -33,7 +56,8 @@ def validate_public_url(url: str) -> str:
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
             raise ValueError("不允许访问内网或本机地址")
     supported_host = any(host == suffix or host.endswith(f".{suffix}") for suffix in ALLOWED_HOST_SUFFIXES)
-    if not supported_host and not parsed.path.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
+    direct_media_host = any(host == suffix or host.endswith(f".{suffix}") for suffix in DIRECT_MEDIA_HOST_SUFFIXES)
+    if not supported_host and not direct_media_host and not parsed.path.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
         raise ValueError("暂不支持这个视频平台")
     return url.strip()
 

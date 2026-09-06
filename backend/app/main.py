@@ -18,7 +18,7 @@ from .database import Base, engine, get_db
 from .jobs import highlight_task, rewrite_task, transcribe_task
 from .models import Task, User
 from .provider_config import provider_config, public_provider_config, update_provider_config
-from .services.media import delete_source, validate_public_url
+from .services.media import delete_source, extract_video_url
 from .worker import enqueue
 
 
@@ -194,7 +194,7 @@ async def upload_task(
 @app.post("/api/tasks/url")
 def url_task(body: UrlBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
     try:
-        url = validate_public_url(body.url)
+        url = extract_video_url(body.url)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     task_id = str(uuid.uuid4())
@@ -252,6 +252,19 @@ def remove_source(task_id: str, user: User = Depends(current_user), db: Session 
     delete_source(task.media_path)
     task.media_path = None
     task.source_delete_at = None
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = owned_task(task_id, user, db)
+    # Remove the complete task directory, including a partially downloaded
+    # URL task that may not have media_path populated yet.
+    task_dir = settings.data_dir / "tasks" / task.id
+    delete_source(task.media_path)
+    shutil.rmtree(task_dir, ignore_errors=True)
+    db.delete(task)
     db.commit()
     return {"ok": True}
 
