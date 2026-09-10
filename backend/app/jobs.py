@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+import re
 import shutil
 
 from sqlalchemy import select
@@ -31,6 +32,25 @@ def _schedule_cleanup(task_id: str, delay: timedelta):
         delay, cleanup_source_task, task_id,
         job_timeout=300, result_ttl=3600,
     )
+
+
+def _needs_title_repair(title: str | None) -> bool:
+    value = str(title or '').strip()
+    if not value or value in {'网络视频', '未命名视频', 'video', 'audio'}:
+        return True
+    if '\ufffd' in value or re.search(r'[ÃÂÐÑ][\x80-\xff]', value):
+        return True
+    compact = re.sub(r'[^0-9a-f]', '', value.lower())
+    return len(value) >= 16 and len(compact) == len(value)
+
+
+def _title_from_transcript(text: str) -> str:
+    compact = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if not compact:
+        return '未命名视频'
+    first = re.split(r'[。！？!?；;]', compact, maxsplit=1)[0].strip(' ,，、:：')
+    candidate = first if len(first) >= 4 else compact
+    return candidate[:36].rstrip('，。！？!?；;') or '未命名视频'
 
 
 def transcribe_task(task_id: str):
@@ -94,6 +114,8 @@ def transcribe_task(task_id: str):
                     text_parts.append(text)
             if not text_parts:
                 raise RuntimeError("没有识别到可用的语音内容")
+            if _needs_title_repair(task.title):
+                task.title = _title_from_transcript(" ".join(text_parts))
             _update(
                 db, task, status="completed", progress=100, message="听写完成",
                 transcript_text="\n".join(text_parts), segments=segments,

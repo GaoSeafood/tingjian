@@ -72,7 +72,7 @@ function TaskTable({ tasks, onOpen, onDelete, full = false }) {
       {tasks.length === 0 && <div className="empty">还没有听写记录，先上传一个视频吧。</div>}
       {tasks.map(task => <div className="task-row" role="button" tabIndex="0" key={task.id}
         onClick={() => onOpen(task.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(task.id) }}>
-        <span className="task-name">{task.media_kind === 'audio' ? <FileAudio size={21}/> : <FileVideo size={21}/>}<b>{task.title}</b></span>
+        <span className="task-name">{task.media_kind === 'audio' ? <FileAudio size={21}/> : <FileVideo size={21}/>}<b>{task.title}</b><small>{sourceDate(task.created_at)}</small></span>
         <span>{task.source_type === 'url' ? '视频链接' : '本地文件'}</span>
         <span>{clock(task.duration)}</span><StatusMark task={task}/>
         <span>{friendlyDate(task.created_at)}</span>
@@ -83,9 +83,8 @@ function TaskTable({ tasks, onOpen, onDelete, full = false }) {
 }
 
 function Home({ tasks, refresh, onOpen }) {
-  const [mode, setMode] = useState('file')
   const [file, setFile] = useState(null)
-  const [url, setUrl] = useState('')
+  const [input, setInput] = useState('')
   const [drag, setDrag] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -93,7 +92,7 @@ function Home({ tasks, refresh, onOpen }) {
   const submit = async () => {
     setBusy(true); setError('')
     try {
-      const task = mode === 'file' ? await api.upload(file) : await api.url(url)
+      const task = file ? await api.upload(file) : await api.url(input)
       await refresh(); onOpen(task.id)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
@@ -101,19 +100,19 @@ function Home({ tasks, refresh, onOpen }) {
   return <main className="home shell">
     <section className="hero-copy">
       <h1>把视频，变成可编辑的文字</h1>
-      <p>上传本地视频或粘贴视频链接，先完成听写，再决定下一步。</p>
+      <p>粘贴视频链接或分享文案，也可以直接上传视频、音频，先完成听写，再决定下一步。</p>
     </section>
-    <div className="mode-tabs">
-      <button className={mode === 'file' ? 'selected' : ''} onClick={() => setMode('file')}><Upload size={20}/>上传文件</button>
-      <button className={mode === 'url' ? 'selected' : ''} onClick={() => setMode('url')}><Link2 size={20}/>视频链接</button>
-    </div>
-    {mode === 'file' ? <div className={`dropzone ${drag ? 'drag' : ''} ${file ? 'has-file' : ''}`}
+    <div className={`unified-input ${drag ? 'drag' : ''} ${file ? 'has-file' : ''}`}
       onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
-      onDrop={e => { e.preventDefault(); setDrag(false); choose(e.dataTransfer.files[0]) }} onClick={() => inputRef.current?.click()}>
+      onDrop={e => { e.preventDefault(); setDrag(false); choose(e.dataTransfer.files[0]) }}>
+      <Link2 size={24} className="unified-input-icon" />
+      <input value={file ? file.name : input} onChange={e => { setInput(e.target.value); setFile(null) }} placeholder="粘贴视频链接或整段分享文案…" aria-label="视频链接或分享文案" />
       <input ref={inputRef} type="file" accept="video/*,audio/*" hidden onChange={e => choose(e.target.files[0])}/>
-      {file ? <>{file.type.startsWith('audio/') ? <FileAudio size={54}/> : <FileVideo size={54}/>}<h3>{file.name}</h3><p>{fileSize(file.size)} · 点击重新选择</p></> : <><Upload size={58}/><h3>拖入视频或音频，或点击选择文件</h3><p>MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB</p></>}
-    </div> : <div className="urlbox"><Link2 size={44}/><div><h3>粘贴公开视频链接</h3><p>支持直接链接，也支持整段分享文案，系统会自动提取其中的视频链接</p></div><input value={url} onChange={e => setUrl(e.target.value)} placeholder="粘贴链接或整段分享文案…" /></div>}
-    <div className="submit-row"><button className="primary" disabled={busy || (mode === 'file' ? !file : !url.trim())} onClick={submit}>
+      <button type="button" className="upload-button" onClick={() => inputRef.current?.click()}><Upload size={18}/>上传</button>
+      {file && <span className="file-pill">{file.type.startsWith('audio/') ? <FileAudio size={16}/> : <FileVideo size={16}/>} {fileSize(file.size)}</span>}
+    </div>
+    <p className="unified-hint">支持 MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB；也支持直接拖入文件</p>
+    <div className="submit-row"><button className="primary" disabled={busy || (!file && !input.trim())} onClick={submit}>
       {busy ? <LoaderCircle className="spin" size={20}/> : <span className="mini-wave"><i/><i/><i/></span>}开始听写
     </button><span>{busy ? '正在上传并创建任务…' : '只进行语音听写，不会自动调用 AI；长视频会自动切换为音频模式。'}</span></div>
     {error && <div className="error-line spacious">{error}</div>}
@@ -209,7 +208,7 @@ function Detail({ taskId, onBack, onSettings }) {
   const running = !['idle','failed'].includes(task.ai_status) || visualRunning
   return <main className="detail shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
-    <div className="detail-head"><div><h1>{task.title}</h1><p>{clock(task.duration)} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : '自定义 ASR'} · 听写完成</p></div>
+    <div className="detail-head"><div><h1>{task.title} <small className="title-date">· {sourceDate(task.created_at)}</small></h1><p>{clock(task.duration)} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : '自定义 ASR'} · 听写完成</p></div>
       <div><a className="outline" href={`/api/tasks/${task.id}/export/txt`}><Download size={18}/>导出</a></div></div>
     <div className="workspace">
       <section className={`transcript-pane ${showTimes ? '' : 'hide-times'}`}>
@@ -350,6 +349,7 @@ function App() {
 
 function clock(seconds = 0) { const s = Math.max(0, Math.floor(seconds)); return `${String(Math.floor(s / 3600)).padStart(2,'0')}:${String(Math.floor((s % 3600) / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}` }
 function friendlyDate(value) { if (!value) return '—'; const d = new Date(value); const today = new Date(); return d.toDateString() === today.toDateString() ? `今天 ${d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}` : d.toLocaleDateString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) }
+function sourceDate(value) { if (!value) return '未知日期'; const d = new Date(value); return d.toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}).replace(/\//g, '-') }
 function fileSize(bytes) { if (bytes < 1024**2) return `${(bytes/1024).toFixed(1)} KB`; return `${(bytes/1024**2).toFixed(1)} MB` }
 
 export default App
