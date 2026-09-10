@@ -18,7 +18,7 @@ from .database import Base, engine, get_db
 from .jobs import analyze_visual_task, highlight_task, rewrite_task, transcribe_task
 from .models import Task, User
 from .provider_config import provider_config, public_provider_config, update_provider_config
-from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, delete_source, extract_video_url, media_kind
+from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, delete_source, extract_video_url, media_kind, source_platform_label
 from .worker import enqueue
 
 
@@ -102,6 +102,7 @@ def task_dict(task: Task, detail: bool = False):
         "visual_status": task.visual_status, "visual_message": task.visual_message,
         "media_kind": media_kind(task.media_path),
         "source_delete_at": task.source_delete_at.isoformat() if task.source_delete_at else None,
+        "source_platform": source_platform_label(task.source_url) if task.source_type == "url" else "本地文件",
         "created_at": task.created_at.isoformat(), "updated_at": task.updated_at.isoformat(),
     }
     if detail:

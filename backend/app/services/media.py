@@ -68,6 +68,27 @@ def media_kind(path: str | Path | None) -> str:
     return "audio" if path and Path(path).suffix.lower() in AUDIO_SUFFIXES else "video"
 
 
+def source_platform_label(url: str | None) -> str:
+    host = (urlparse(url or "").hostname or "").lower().rstrip(".")
+    groups = (
+        (("douyin.com", "iesdouyin.com"), "抖音"),
+        (("xiaohongshu.com", "xhslink.com"), "小红书"),
+        (("bilibili.com", "b23.tv"), "哔哩哔哩"),
+        (("youtube.com", "youtu.be"), "YouTube"),
+        (("tiktok.com",), "TikTok"),
+        (("weibo.com", "weibo.cn"), "微博"),
+        (("instagram.com",), "Instagram"),
+        (("twitter.com", "x.com"), "X / Twitter"),
+        (("qq.com", "qpic.cn", "qlogo.cn", "weixin.qq.com", "wechat.com"), "腾讯/微信"),
+    )
+    for suffixes, label in groups:
+        if any(host == suffix or host.endswith(f".{suffix}") for suffix in suffixes):
+            return label
+    if url and urlparse(url).path.lower().endswith(tuple(VIDEO_SUFFIXES)):
+        return "视频直链"
+    return "视频链接"
+
+
 def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool]:
     normalized_url = validate_public_url(url)
     audio_only = False

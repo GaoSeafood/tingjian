@@ -73,7 +73,7 @@ function TaskTable({ tasks, onOpen, onDelete, full = false }) {
       {tasks.map(task => <div className="task-row" role="button" tabIndex="0" key={task.id}
         onClick={() => onOpen(task.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(task.id) }}>
         <span className="task-name">{task.media_kind === 'audio' ? <FileAudio size={21}/> : <FileVideo size={21}/>}<b>{task.title}</b><small>{sourceDate(task.created_at)}</small></span>
-        <span>{task.source_type === 'url' ? '视频链接' : '本地文件'}</span>
+        <span>{task.source_platform || (task.source_type === 'url' ? '视频链接' : '本地文件')}</span>
         <span>{clock(task.duration)}</span><StatusMark task={task}/>
         <span>{friendlyDate(task.created_at)}</span>
         <span className="task-actions">{onDelete && <button className="task-delete" aria-label={`删除${task.title}`} onClick={event => remove(event, task)}><Trash2 size={16}/></button>}<ChevronRight size={18}/></span>
@@ -208,7 +208,7 @@ function Detail({ taskId, onBack, onSettings }) {
   const running = !['idle','failed'].includes(task.ai_status) || visualRunning
   return <main className="detail shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
-    <div className="detail-head"><div><h1>{task.title} <small className="title-date">· {sourceDate(task.created_at)}</small></h1><p>{clock(task.duration)} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : '自定义 ASR'} · 听写完成</p></div>
+    <div className="detail-head"><div><h1>{task.title} <small className="title-date">· {sourceDate(task.created_at)}</small></h1><p>{clock(task.duration)} · {task.source_platform || '本地文件'} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : '自定义 ASR'} · 听写完成</p></div>
       <div><a className="outline" href={`/api/tasks/${task.id}/export/txt`}><Download size={18}/>导出</a></div></div>
     <div className="workspace">
       <section className={`transcript-pane ${showTimes ? '' : 'hide-times'}`}>
