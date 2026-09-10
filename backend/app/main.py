@@ -300,6 +300,8 @@ def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: 
     task = owned_task(task_id, user, db)
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
+    if media_kind(task.media_path) == "audio":
+        raise HTTPException(409, "画面分析仅支持视频文件")
     if not task.media_path or not Path(task.media_path).exists():
         raise HTTPException(409, "原视频已删除，无法分析画面")
     if task.visual_status not in {"idle", "failed"}:
