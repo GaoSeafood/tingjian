@@ -121,7 +121,14 @@ function Home({ tasks, refresh, onOpen }) {
 }
 
 function TranscriptEditor({ segments, showTimes, onChange }) {
+  const areaRef = useRef(null)
   const value = segments.map(segment => showTimes ? `[${segment.start}] ${segment.text}` : segment.text).join('\n')
+  useEffect(() => {
+    const area = areaRef.current
+    if (!area) return
+    area.style.height = 'auto'
+    area.style.height = `${Math.max(260, area.scrollHeight)}px`
+  }, [value])
   const edit = event => {
     const lines = event.target.value.split(/\r?\n/)
     onChange(lines.map((line, index) => {
@@ -130,7 +137,7 @@ function TranscriptEditor({ segments, showTimes, onChange }) {
       return {...base, text}
     }))
   }
-  return <div className="transcript-editor"><textarea value={value} onChange={edit} spellCheck="false" placeholder="听写内容会显示在这里…" /></div>
+  return <div className="transcript-editor"><textarea ref={areaRef} value={value} onChange={edit} spellCheck="false" wrap="soft" placeholder="听写内容会显示在这里…" /></div>
 }
 
 function clockSeconds(value) {
@@ -208,6 +215,7 @@ function Detail({ taskId, onBack, onSettings }) {
   const [action, setAction] = useState(null)
   const [rewriteView, setRewriteView] = useState('preview')
   const [mobilePane, setMobilePane] = useState('source')
+  const [activeTool, setActiveTool] = useState('highlights')
   const [notice, setNotice] = useState('')
   const mediaRef = useRef(null)
   const load = useCallback(async () => {
@@ -223,17 +231,17 @@ function Detail({ taskId, onBack, onSettings }) {
   }, [task, load])
   const save = async () => { setTask(await api.saveTranscript(taskId, segments)); setDirty(false); setNotice('已保存修改') }
   const startHighlights = async () => {
-    setAction('highlights'); setNotice('')
+    setActiveTool('highlights'); setAction('highlights'); setNotice('')
     try { await api.highlights(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startVisualAnalysis = async () => {
-    setAction('visual'); setNotice('')
+    setActiveTool('visual'); setAction('visual'); setNotice('')
     try { await api.visualAnalysis(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startRewrite = async () => {
-    setAction('rewrite'); setNotice('')
+    setActiveTool('rewrite'); setAction('rewrite'); setNotice('')
     try { await api.rewrite(taskId, direction); await load() }
     catch (err) { setAction('rewrite'); setNotice(err.message) }
   }
@@ -266,7 +274,7 @@ function Detail({ taskId, onBack, onSettings }) {
     <div className="mobile-pane-tabs" role="tablist" aria-label="详情视图"><button className={mobilePane === 'source' ? 'active' : ''} onClick={() => setMobilePane('source')}>原视频与听写</button><button className={mobilePane === 'ai' ? 'active' : ''} onClick={() => setMobilePane('ai')}>AI 工作区</button></div>
     <div className="workspace">
       <section className={`transcript-pane ${showTimes ? '' : 'hide-times'} ${mobilePane === 'ai' ? 'mobile-hidden' : ''}`}>
-        {task.source_available ? task.media_kind === 'audio' ? <audio ref={mediaRef} className="media-player audio-player" controls src={`/api/tasks/${task.id}/media`} /> : <video ref={mediaRef} className="media-player" controls src={`/api/tasks/${task.id}/media`} /> : <div className="media-missing">原媒体已按策略删除，听写稿仍会保留。</div>}
+        <div className="media-sticky">{task.source_available ? task.media_kind === 'audio' ? <audio ref={mediaRef} className="media-player audio-player" controls src={`/api/tasks/${task.id}/media`} /> : <video ref={mediaRef} className="media-player" controls src={`/api/tasks/${task.id}/media`} /> : <div className="media-missing">原媒体已按策略删除，听写稿仍会保留。</div>}</div>
         <div className="pane-title"><h2>听写原文</h2><label className="switch-label">显示时间码<input type="checkbox" checked={showTimes} onChange={e => setShowTimes(e.target.checked)}/><i/></label></div>
         <div className="transcript-tools"><label><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文案" /></label>
           <button className="outline compact" onClick={() => navigator.clipboard.writeText(segments.map(x => x.text).join('\n'))}><Copy size={17}/>复制全文</button>
@@ -277,20 +285,22 @@ function Detail({ taskId, onBack, onSettings }) {
         <TranscriptEditor segments={visible} showTimes={showTimes} onChange={updateVisible}/>
       </section>
       <aside className={`next-pane ${mobilePane === 'source' ? 'mobile-hidden' : ''}`}>
-        <div><h2>下一步</h2><p>听写已完成。需要时再调用 AI，不会自动消耗额度。</p></div>
+        <div className="next-pane-heading"><h2>AI 工作区</h2><p>选择一个功能，结果只在当前面板展开。</p></div>
         <div className="action-grid">
-          <article className="action-row"><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : '开始分析'}</button></article>
-          <article className="action-row visual-action"><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_status === 'completed' ? '重新分析' : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
-          <article className="action-row rewrite"><span className="action-icon"><PencilLine/></span><div><h3>复刻改编 <small className="expert-badge">文爆爆</small></h3><p>文爆爆会保留有效结构与节奏，生成新的口播文案</p></div><button className="outline compact coral-text" disabled={running} onClick={() => setAction('rewrite')}>开始改编</button></article>
+          <article className={`action-row ${activeTool === 'highlights' ? 'selected' : ''}`}><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : task.highlights?.length ? `查看 ${task.highlights.length} 个` : '开始分析'}</button></article>
+          <article className={`action-row visual-action ${activeTool === 'visual' ? 'selected' : ''}`}><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_status === 'completed' ? `查看 ${task.visual_analysis?.length || 0} 个` : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
+          <article className={`action-row rewrite ${activeTool === 'rewrite' ? 'selected' : ''}`}><span className="action-icon"><PencilLine/></span><div><h3>复刻改编 <small className="expert-badge">文爆爆</small></h3><p>文爆爆会保留有效结构与节奏，生成新的口播文案</p></div><button className="outline compact coral-text" disabled={running} onClick={() => { setActiveTool('rewrite'); setAction('rewrite') }}>{task.rewrite_text ? '查看改编' : '开始改编'}</button></article>
           {action === 'rewrite' && <div className="rewrite-form"><label>改编方向<textarea value={direction} onChange={e => setDirection(e.target.value)} placeholder="例如：改成面向新手的 60 秒口播，语气自然、有反差感"/></label><button className="primary compact" disabled={running} onClick={startRewrite}>生成新文案</button></div>}
         </div>
-        {running && <div className="ai-running"><LoaderCircle className="spin" size={18}/>{task.ai_message}</div>}
-        {task.ai_status === 'failed' && <div className="error-line">{task.ai_message}</div>}
-        {task.highlights?.length > 0 && <HighlightResults items={task.highlights} onSeek={seekTo}/>}
-        {task.visual_analysis?.length > 0 && <VisualResults items={task.visual_analysis} onSeek={seekTo}/>}
-        {task.rewrite_text && <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>改编结果</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => navigator.clipboard.writeText(task.rewrite_text)}><Copy size={16}/>复制</button></div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea value={task.rewrite_text} onChange={event => setTask(current => ({...current, rewrite_text: event.target.value}))} spellCheck="false" /> : <MarkdownPreview value={task.rewrite_text}/>}</div></div>}
-        <div className="ai-settings"><div><h3>AI 设置</h3><button onClick={onSettings}>更改</button></div><p><span className="gemini-mark">✦</span>首选 <b>Gemini</b></p><p><span className="gpt-mark">◎</span>备用 <b>GPT</b></p></div>
-        <div className="retention"><span>原视频将在 24 小时后自动删除</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除</button>}</div>
+        <div className="next-results">
+          {running && <div className="ai-running"><LoaderCircle className="spin" size={18}/>{task.ai_message}</div>}
+          {task.ai_status === 'failed' && <div className="error-line">{task.ai_message}</div>}
+          {activeTool === 'highlights' && (task.highlights?.length > 0 ? <HighlightResults items={task.highlights} onSeek={seekTo}/> : <div className="result-empty">点击上方“找亮点”，从听写稿中提取值得保留的片段。</div>)}
+          {activeTool === 'visual' && (task.visual_analysis?.length > 0 ? <VisualResults items={task.visual_analysis} onSeek={seekTo}/> : <div className="result-empty">点击上方“分析画面”，识别视频中的关键视觉信息。</div>)}
+          {activeTool === 'rewrite' && (task.rewrite_text ? <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>改编结果</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => navigator.clipboard.writeText(task.rewrite_text)}><Copy size={16}/>复制</button></div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea value={task.rewrite_text} onChange={event => setTask(current => ({...current, rewrite_text: event.target.value}))} spellCheck="false" /> : <MarkdownPreview value={task.rewrite_text}/>}</div></div> : <div className="result-empty">点击上方“复刻改编”，让文爆爆生成新的口播文案。</div>)}
+          <div className="ai-settings"><div><h3>AI 设置</h3><button onClick={onSettings}>更改</button></div><p><span className="gemini-mark">✦</span>首选 <b>Gemini</b></p><p><span className="gpt-mark">◎</span>备用 <b>GPT</b></p></div>
+          <div className="retention"><span>原视频将在 24 小时后自动删除</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除</button>}</div>
+        </div>
         {notice && <div className="notice">{notice}</div>}
       </aside>
     </div>
