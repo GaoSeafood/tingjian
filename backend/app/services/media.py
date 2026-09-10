@@ -158,5 +158,6 @@ def delete_source(path: str | None) -> None:
             source.unlink(missing_ok=True)
             (source.parent / "preview.mp4").unlink(missing_ok=True)
             shutil.rmtree(source.parent / "audio", ignore_errors=True)
+            shutil.rmtree(source.parent / "visual", ignore_errors=True)
         except OSError:
             pass
