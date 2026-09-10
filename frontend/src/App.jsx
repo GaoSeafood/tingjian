@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ArrowLeft, Check, ChevronRight, Clock3, Copy, Download, FileAudio, FileVideo, Film,
+  ArrowLeft, AudioLines, Check, ChevronRight, Clock3, Copy, Download, Film, Video,
   History, Link2, LoaderCircle, LockKeyhole, LogOut, PencilLine,
   Play, RotateCcw, Search, Sparkles, Trash2, Upload, UserRound, Volume2, WandSparkles,
   SlidersHorizontal, Save,
@@ -72,7 +72,7 @@ function TaskTable({ tasks, onOpen, onDelete, full = false }) {
       {tasks.length === 0 && <div className="empty">还没有听写记录，先上传一个视频吧。</div>}
       {tasks.map(task => <div className="task-row" role="button" tabIndex="0" key={task.id}
         onClick={() => onOpen(task.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(task.id) }}>
-        <span className="task-name">{task.media_kind === 'audio' ? <FileAudio size={21}/> : <FileVideo size={21}/>}<b>{task.title}</b><small>{sourceDate(task.created_at)}</small></span>
+        <span className="task-name">{task.media_kind === 'audio' ? <AudioLines size={22}/> : <Video size={22}/>}<b>{task.title}</b><small>{sourceDate(task.created_at)}</small></span>
         <span>{task.source_platform || (task.source_type === 'url' ? '视频链接' : '本地文件')}</span>
         <span>{clock(task.duration)}</span><StatusMark task={task}/>
         <span>{friendlyDate(task.created_at)}</span>
@@ -109,7 +109,7 @@ function Home({ tasks, refresh, onOpen }) {
       <input value={file ? file.name : input} onChange={e => { setInput(e.target.value); setFile(null) }} placeholder="粘贴视频链接或整段分享文案…" aria-label="视频链接或分享文案" />
       <input ref={inputRef} type="file" accept="video/*,audio/*" hidden onChange={e => choose(e.target.files[0])}/>
       <button type="button" className="upload-button" onClick={() => inputRef.current?.click()}><Upload size={18}/>上传</button>
-      {file && <span className="file-pill">{file.type.startsWith('audio/') ? <FileAudio size={16}/> : <FileVideo size={16}/>} {fileSize(file.size)}</span>}
+      {file && <span className="file-pill">{file.type.startsWith('audio/') ? <AudioLines size={16}/> : <Video size={16}/>} {fileSize(file.size)}</span>}
     </div>
     <p className="unified-hint">支持 MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB；也支持直接拖入文件</p>
     <div className="submit-row"><button className="primary" disabled={busy || (!file && !input.trim())} onClick={submit}>
@@ -205,7 +205,7 @@ function MarkdownPreview({ value }) {
   return <div className="markdown-preview">{blocks.length ? blocks : <p className="empty-markdown">暂无改编内容</p>}</div>
 }
 
-function Detail({ taskId, onBack, onSettings }) {
+function Detail({ taskId, onBack }) {
   const [task, setTask] = useState(null)
   const [segments, setSegments] = useState([])
   const [search, setSearch] = useState('')
@@ -300,7 +300,6 @@ function Detail({ taskId, onBack, onSettings }) {
           {activeTool === 'highlights' && (task.highlights?.length > 0 ? <HighlightResults items={task.highlights} onSeek={seekTo}/> : <div className="result-empty">点击上方“找亮点”，从听写稿中提取值得保留的片段。</div>)}
           {activeTool === 'visual' && (task.visual_analysis?.length > 0 ? <VisualResults items={task.visual_analysis} onSeek={seekTo}/> : <div className="result-empty">点击上方“分析画面”，识别视频中的关键视觉信息。</div>)}
           {activeTool === 'rewrite' && (task.rewrite_text ? <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>改编结果</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => navigator.clipboard.writeText(task.rewrite_text)}><Copy size={16}/>复制</button></div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea value={task.rewrite_text} onChange={event => setTask(current => ({...current, rewrite_text: event.target.value}))} spellCheck="false" /> : <MarkdownPreview value={task.rewrite_text}/>}</div></div> : <div className="result-empty">点击上方“复刻改编”，让文爆爆生成新的口播文案。</div>)}
-          <div className="ai-settings"><div><h3>AI 设置</h3><button onClick={onSettings}>更改</button></div><p><span className="gemini-mark">✦</span>首选 <b>Gemini</b></p><p><span className="gpt-mark">◎</span>备用 <b>GPT</b></p></div>
           <div className="retention"><span>原视频将在 24 小时后自动删除</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除</button>}</div>
         </div>
         {notice && <div className="notice">{notice}</div>}
@@ -410,7 +409,9 @@ function App() {
     {page === 'home' && <Home tasks={tasks} refresh={refresh} onOpen={open}/>} 
     {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>历史记录</h1><p>你的听写、亮点与改编结果都保存在这里。</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full/></main>}
     {page === 'settings' && <SettingsPage user={user} onBack={() => setPage('home')}/>}
-    {page === 'detail' && selected && <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} onSettings={() => setPage('settings')}/>} 
+    {page === 'detail' && selected && (
+      <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} />
+    )}
     <footer className="statusbar"><span><span className="footer-wave"><i/><i/><i/></span><i className="online"/>ASR 服务在线</span><span><LockKeyhole size={15}/>仅你可访问</span></footer>
   </div>
 }
