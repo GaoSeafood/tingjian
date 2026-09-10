@@ -230,13 +230,15 @@ function Detail({ taskId, onBack, onSettings }) {
     const timer = setInterval(() => load().catch(console.error), 1800); return () => clearInterval(timer)
   }, [task, load])
   const save = async () => { setTask(await api.saveTranscript(taskId, segments)); setDirty(false); setNotice('已保存修改') }
+  const showHighlights = () => { setActiveTool('highlights'); setAction(null); setMobilePane('ai'); setNotice('') }
   const startHighlights = async () => {
-    setActiveTool('highlights'); setAction('highlights'); setMobilePane('ai'); setNotice('')
+    showHighlights(); setAction('highlights')
     try { await api.highlights(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
+  const showVisualAnalysis = () => { setActiveTool('visual'); setAction(null); setMobilePane('ai'); setNotice('') }
   const startVisualAnalysis = async () => {
-    setActiveTool('visual'); setAction('visual'); setMobilePane('ai'); setNotice('')
+    showVisualAnalysis(); setAction('visual')
     try { await api.visualAnalysis(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
@@ -287,8 +289,8 @@ function Detail({ taskId, onBack, onSettings }) {
       <aside className={`next-pane ${mobilePane === 'source' ? 'mobile-hidden' : ''}`}>
         <div className="next-pane-heading"><h2>AI 工作区</h2><p>选择一个功能，结果只在当前面板展开。</p></div>
         <div className="action-grid">
-          <article className={`action-row ${activeTool === 'highlights' ? 'selected' : ''}`}><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : task.highlights?.length ? `查看 ${task.highlights.length} 个` : '开始分析'}</button></article>
-          <article className={`action-row visual-action ${activeTool === 'visual' ? 'selected' : ''}`}><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_status === 'completed' ? `查看 ${task.visual_analysis?.length || 0} 个` : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
+          <article className={`action-row ${activeTool === 'highlights' ? 'selected' : ''}`}><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={task.highlights?.length ? showHighlights : startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : task.highlights?.length ? `查看 ${task.highlights.length} 个` : '开始分析'}</button></article>
+          <article className={`action-row visual-action ${activeTool === 'visual' ? 'selected' : ''}`}><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={task.visual_analysis?.length ? showVisualAnalysis : startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_analysis?.length ? `查看 ${task.visual_analysis.length} 个` : task.visual_status === 'completed' ? '暂无结果' : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
           <article className={`action-row rewrite ${activeTool === 'rewrite' ? 'selected' : ''}`}><span className="action-icon"><PencilLine/></span><div><h3>复刻改编 <small className="expert-badge">文爆爆</small></h3><p>文爆爆会保留有效结构与节奏，生成新的口播文案</p></div><button className="outline compact coral-text" disabled={running} onClick={() => { setActiveTool('rewrite'); setAction('rewrite'); setMobilePane('ai') }}>{task.rewrite_text ? '查看改编' : '开始改编'}</button></article>
           {action === 'rewrite' && <div className="rewrite-form"><label>改编方向<textarea value={direction} onChange={e => setDirection(e.target.value)} placeholder="例如：改成面向新手的 60 秒口播，语气自然、有反差感"/></label><button className="primary compact" disabled={running} onClick={startRewrite}>生成新文案</button></div>}
         </div>
