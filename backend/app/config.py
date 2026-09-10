@@ -29,6 +29,8 @@ class Settings:
     # providers while remaining comfortably below MiMo's payload limit.
     asr_chunk_seconds: int = int(os.getenv("ASR_CHUNK_SECONDS", "180"))
     url_audio_only_minutes: int = int(os.getenv("URL_AUDIO_ONLY_MINUTES", "45"))
+    visual_max_frames: int = int(os.getenv("VISUAL_MAX_FRAMES", "48"))
+    visual_min_interval_seconds: int = int(os.getenv("VISUAL_MIN_INTERVAL_SECONDS", "4"))
     custom_asr_base_url: str = os.getenv("CUSTOM_ASR_BASE_URL", "")
     custom_asr_api_key: str = os.getenv("CUSTOM_ASR_API_KEY", "")
     custom_asr_model: str = os.getenv("CUSTOM_ASR_MODEL", "whisper-1")

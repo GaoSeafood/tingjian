@@ -10,6 +10,7 @@ from .models import Task, utcnow
 from .services.asr import ASRClient
 from .services.llm import find_highlights, rewrite_script
 from .services.media import download_video, ensure_browser_preview, media_kind, probe_duration, split_audio
+from .services.vision import analyze_visuals
 
 
 def _update(db, task: Task, **values):
@@ -117,11 +118,26 @@ def highlight_task(task_id: str):
             return
         try:
             _update(db, task, ai_status="highlighting", ai_message="Gemini 正在寻找亮点")
-            highlights = find_highlights(task.title, task.segments or [])
+            highlights = find_highlights(task.title, task.segments or [], task.visual_analysis or [])
             _update(db, task, highlights=highlights, ai_status="idle", ai_message="亮点分析完成")
         except Exception as exc:
             db.rollback()
             _update(db, task, ai_status="failed", ai_message=str(exc))
+
+
+def analyze_visual_task(task_id: str):
+    with SessionLocal() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return
+        try:
+            _update(db, task, visual_status="analyzing", visual_message="正在抽取关键帧并分析画面")
+            media_path = Path(task.media_path or "")
+            result = analyze_visuals(task.title, task.transcript_text or "", task.segments or [], media_path, settings.data_dir / "tasks" / task.id)
+            _update(db, task, visual_analysis=result, visual_status="completed", visual_message="画面分析完成")
+        except Exception as exc:
+            db.rollback()
+            _update(db, task, visual_status="failed", visual_message=str(exc)[:300])
 
 
 def rewrite_task(task_id: str, direction: str):

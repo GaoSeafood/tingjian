@@ -39,6 +39,9 @@ class Task(Base):
     transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     segments: Mapped[list] = mapped_column(JSON, default=list)
     highlights: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    visual_analysis: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    visual_status: Mapped[str] = mapped_column(String(30), default="idle")
+    visual_message: Mapped[str] = mapped_column(String(300), default="")
     rewrite_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_status: Mapped[str] = mapped_column(String(30), default="idle")
     ai_message: Mapped[str] = mapped_column(String(300), default="")
@@ -53,4 +56,3 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-

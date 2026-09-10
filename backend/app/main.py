@@ -9,13 +9,13 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, Uploa
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import desc, select
+from sqlalchemy import desc, inspect, select, text
 from sqlalchemy.orm import Session
 
 from .auth import create_session, current_user, hash_password, seed_admin, verify_password
 from .config import settings
 from .database import Base, engine, get_db
-from .jobs import highlight_task, rewrite_task, transcribe_task
+from .jobs import analyze_visual_task, highlight_task, rewrite_task, transcribe_task
 from .models import Task, User
 from .provider_config import provider_config, public_provider_config, update_provider_config
 from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, delete_source, extract_video_url, media_kind
@@ -68,11 +68,28 @@ class UserCreateBody(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    _ensure_schema()
     seed_admin()
     yield
 
 
 app = FastAPI(title="听见", lifespan=lifespan)
+
+
+def _ensure_schema():
+    """Add fields introduced after the initial deployment without losing data."""
+    columns = {item["name"] for item in inspect(engine).get_columns("tasks")}
+    additions = {
+        "visual_analysis": "JSON",
+        "visual_status": "VARCHAR(30) DEFAULT 'idle'",
+        "visual_message": "VARCHAR(300) DEFAULT ''",
+    }
+    missing = [(name, definition) for name, definition in additions.items() if name not in columns]
+    if not missing:
+        return
+    with engine.begin() as connection:
+        for name, definition in missing:
+            connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {name} {definition}"))
 
 
 def task_dict(task: Task, detail: bool = False):
@@ -82,6 +99,7 @@ def task_dict(task: Task, detail: bool = False):
         "progress": task.progress, "message": task.message, "error": task.error,
         "asr_provider": task.asr_provider, "ai_status": task.ai_status,
         "ai_message": task.ai_message, "source_available": bool(task.media_path),
+        "visual_status": task.visual_status, "visual_message": task.visual_message,
         "media_kind": media_kind(task.media_path),
         "source_delete_at": task.source_delete_at.isoformat() if task.source_delete_at else None,
         "created_at": task.created_at.isoformat(), "updated_at": task.updated_at.isoformat(),
@@ -90,6 +108,7 @@ def task_dict(task: Task, detail: bool = False):
         data.update({
             "transcript_text": task.transcript_text, "segments": task.segments or [],
             "highlights": task.highlights, "rewrite_text": task.rewrite_text,
+            "visual_analysis": task.visual_analysis,
         })
     return data
 
@@ -273,6 +292,21 @@ def start_highlights(task_id: str, user: User = Depends(current_user), db: Sessi
     task.ai_status, task.ai_message = "queued", "亮点分析已排队"
     db.commit()
     enqueue(highlight_task, task.id)
+    return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/visual-analysis")
+def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = owned_task(task_id, user, db)
+    if task.status != "completed":
+        raise HTTPException(409, "请先完成听写")
+    if not task.media_path or not Path(task.media_path).exists():
+        raise HTTPException(409, "原视频已删除，无法分析画面")
+    if task.visual_status not in {"idle", "failed"}:
+        raise HTTPException(409, "已有画面分析任务正在进行")
+    task.visual_status, task.visual_message = "queued", "画面分析已排队"
+    db.commit()
+    enqueue(analyze_visual_task, task.id)
     return {"ok": True}
 
 

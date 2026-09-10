@@ -143,6 +143,17 @@ function HighlightResults({ items }) {
   </div>
 }
 
+function VisualResults({ items }) {
+  return <div className="visual-results"><div className="result-heading"><Film size={18}/><b>画面分析</b><small>{items.length} 个关键画面</small></div>
+    {items.map((item, index) => <article className="visual-item" key={index}>
+      <div><b>{item.timestamp || `画面 ${index + 1}`}</b><span>{item.suggested_use || '视觉信息'}</span></div>
+      <p>{item.description || '未提供画面描述'}</p>
+      {item.onscreen_text && <small>画面文字：{item.onscreen_text}</small>}
+      {item.visual_hook && <small>亮点：{item.visual_hook}</small>}
+    </article>)}
+  </div>
+}
+
 function Detail({ taskId, onBack, onSettings }) {
   const [task, setTask] = useState(null)
   const [segments, setSegments] = useState([])
@@ -159,13 +170,20 @@ function Detail({ taskId, onBack, onSettings }) {
   }, [taskId, dirty])
   useEffect(() => { load().catch(console.error) }, [load])
   useEffect(() => {
-    if (!task || (task.status === 'completed' && ['idle','failed'].includes(task.ai_status)) || task.status === 'failed') return
+    const visualRunning = task && !['idle', 'completed', 'failed'].includes(task.visual_status || 'idle')
+    const aiRunning = task && !['idle', 'failed'].includes(task.ai_status)
+    if (!task || (task.status === 'completed' && !aiRunning && !visualRunning) || task.status === 'failed') return
     const timer = setInterval(() => load().catch(console.error), 1800); return () => clearInterval(timer)
   }, [task, load])
   const save = async () => { setTask(await api.saveTranscript(taskId, segments)); setDirty(false); setNotice('已保存修改') }
   const startHighlights = async () => {
     setAction('highlights'); setNotice('')
     try { await api.highlights(taskId); await load() }
+    catch (err) { setAction(null); setNotice(err.message) }
+  }
+  const startVisualAnalysis = async () => {
+    setAction('visual'); setNotice('')
+    try { await api.visualAnalysis(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startRewrite = async () => {
@@ -187,7 +205,8 @@ function Detail({ taskId, onBack, onSettings }) {
     }))
     setDirty(true)
   }
-  const running = !['idle','failed'].includes(task.ai_status)
+  const visualRunning = !['idle', 'completed', 'failed'].includes(task.visual_status || 'idle')
+  const running = !['idle','failed'].includes(task.ai_status) || visualRunning
   return <main className="detail shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
     <div className="detail-head"><div><h1>{task.title}</h1><p>{clock(task.duration)} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : '自定义 ASR'} · 听写完成</p></div>
@@ -207,11 +226,13 @@ function Detail({ taskId, onBack, onSettings }) {
       <aside className="next-pane">
         <div><h2>下一步</h2><p>听写已完成。需要时再调用 AI，不会自动消耗额度。</p></div>
         <article className="action-row"><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : '开始分析'}</button></article>
+        <article className="action-row visual-action"><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.visual_status === 'completed' ? '重新分析' : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
         <article className="action-row rewrite"><span className="action-icon"><PencilLine/></span><div><h3>复刻改编</h3><p>保留结构与节奏，生成新的口播文案</p></div><button className="outline compact coral-text" disabled={running} onClick={() => setAction('rewrite')}>开始改编</button></article>
         {action === 'rewrite' && <div className="rewrite-form"><label>改编方向<textarea value={direction} onChange={e => setDirection(e.target.value)} placeholder="例如：改成面向新手的 60 秒口播，语气自然、有反差感"/></label><button className="primary compact" disabled={running} onClick={startRewrite}>生成新文案</button></div>}
         {running && <div className="ai-running"><LoaderCircle className="spin" size={18}/>{task.ai_message}</div>}
         {task.ai_status === 'failed' && <div className="error-line">{task.ai_message}</div>}
         {task.highlights?.length > 0 && <HighlightResults items={task.highlights}/>} 
+        {task.visual_analysis?.length > 0 && <VisualResults items={task.visual_analysis}/>}
         {task.rewrite_text && <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>改编结果</b><button onClick={() => navigator.clipboard.writeText(task.rewrite_text)}><Copy size={16}/>复制</button></div><pre>{task.rewrite_text}</pre></div>}
         <div className="ai-settings"><div><h3>AI 设置</h3><button onClick={onSettings}>更改</button></div><p><span className="gemini-mark">✦</span>首选 <b>Gemini</b></p><p><span className="gpt-mark">◎</span>备用 <b>GPT</b></p></div>
         <div className="retention"><span>原视频将在 24 小时后自动删除</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除</button>}</div>

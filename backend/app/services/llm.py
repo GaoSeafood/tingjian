@@ -54,11 +54,16 @@ def _json(text: str):
     return json.loads(cleaned)
 
 
-def find_highlights(title: str, segments: list[dict]) -> list[dict]:
+def find_highlights(title: str, segments: list[dict], visual_analysis: list[dict] | None = None) -> list[dict]:
     transcript = "\n".join(f"[{s['start']}] {s['text']}" for s in segments)
+    visual_context = "\n".join(
+        f"[{item.get('timestamp', '')}] 画面：{item.get('description', '')}；视觉吸引力：{item.get('visual_hook', '')}"
+        for item in (visual_analysis or [])
+    )
+    visual_instruction = f"\n\n画面分析（可用于判断视觉亮点）：\n{visual_context}" if visual_context else ""
     messages = [
         {"role": "system", "content": "你是短视频内容编辑。只能使用给定时间码，不得编造原话。只输出合法 JSON。"},
-        {"role": "user", "content": f"""请从《{title}》听写稿中找出 5-12 个最值得保留的亮点。每项包含 start、end、original_text、reason、title、category、score（1-10）。start/end 必须取自听写稿相邻时间段。输出 JSON 数组。\n\n{transcript}"""},
+        {"role": "user", "content": f"""请从《{title}》听写稿中找出 5-12 个最值得保留的亮点。优先选择台词和画面同时有吸引力的片段，并在 reason 中说明画面贡献。每项包含 start、end、original_text、reason、title、category、score（1-10）。start/end 必须取自听写稿相邻时间段。输出 JSON 数组。\n\n{transcript}{visual_instruction}"""},
     ]
     data = _json(_call(messages))
     return data if isinstance(data, list) else data.get("highlights", [])

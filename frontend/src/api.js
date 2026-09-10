@@ -42,6 +42,7 @@ export const api = {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segments }),
   }),
   highlights: (id) => request(`/api/tasks/${id}/highlights`, { method: 'POST' }),
+  visualAnalysis: (id) => request(`/api/tasks/${id}/visual-analysis`, { method: 'POST' }),
   rewrite: (id, direction) => request(`/api/tasks/${id}/rewrite`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
   }),
