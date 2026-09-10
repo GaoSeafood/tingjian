@@ -1,0 +1,9 @@
+{
+  "name": "content-creator",
+  "display_name": "文爆爆",
+  "version": "1.0.1-server",
+  "source": "本机 content-creator 专家包的服务器适配版",
+  "scope": "all_authenticated_users",
+  "enabled_skills": ["video_script_rewrite", "humanizer"],
+  "disabled_skills": ["anti-distill", "novel-writer", "novel-writing", "minimax-docx"]
+}

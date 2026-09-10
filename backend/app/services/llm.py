@@ -3,6 +3,7 @@ import re
 
 import requests
 
+from ..experts.content_creator import system_prompt as content_creator_prompt
 from ..provider_config import provider_config
 
 
@@ -71,7 +72,7 @@ def find_highlights(title: str, segments: list[dict], visual_analysis: list[dict
 
 def rewrite_script(title: str, transcript: str, direction: str) -> str:
     messages = [
-        {"role": "system", "content": "你是中文短视频脚本编辑。复刻的是结构、节奏和表达策略，不照抄具体措辞或虚构事实。"},
+        {"role": "system", "content": content_creator_prompt()},
         {"role": "user", "content": f"""原稿标题：{title}\n改编方向：{direction or '保留核心主题，改成更自然有吸引力的中文口播'}\n\n原稿：\n{transcript}\n\n请输出可直接使用的新口播稿，并在末尾附上三条结构说明。"""},
     ]
     return _call(messages).strip()
