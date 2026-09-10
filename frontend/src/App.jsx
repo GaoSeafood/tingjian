@@ -153,6 +153,43 @@ function VisualResults({ items }) {
   </div>
 }
 
+function inlineMarkdown(value, keyPrefix) {
+  const parts = String(value || '').split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={`${keyPrefix}-b-${index}`}>{part.slice(2, -2)}</strong>
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={`${keyPrefix}-c-${index}`}>{part.slice(1, -1)}</code>
+    return <span key={`${keyPrefix}-t-${index}`}>{part}</span>
+  })
+}
+
+function MarkdownPreview({ value }) {
+  const lines = String(value || '').replace(/^```(?:markdown)?\s*/i, '').replace(/\s*```$/i, '').split(/\r?\n/)
+  const blocks = []
+  let list = null
+  const flushList = () => {
+    if (!list) return
+    const Tag = list.type === 'ol' ? 'ol' : 'ul'
+    blocks.push(<Tag key={`list-${blocks.length}`}>{list.items.map((item, index) => <li key={index}>{inlineMarkdown(item, `li-${index}`)}</li>)}</Tag>)
+    list = null
+  }
+  lines.forEach((line, index) => {
+    const trimmed = line.trim()
+    if (!trimmed) { flushList(); return }
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/)
+    if (heading) { flushList(); const Tag = `h${Math.min(6, heading[1].length)}`; blocks.push(<Tag key={`heading-${index}`}>{inlineMarkdown(heading[2], `h-${index}`)}</Tag>); return }
+    const unordered = trimmed.match(/^[-*]\s+(.+)$/)
+    const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/)
+    if (unordered || ordered) {
+      const type = ordered ? 'ol' : 'ul'
+      if (!list || list.type !== type) { flushList(); list = {type, items: []} }
+      list.items.push((unordered || ordered)[1]); return
+    }
+    flushList(); blocks.push(<p key={`paragraph-${index}`}>{inlineMarkdown(trimmed, `p-${index}`)}</p>)
+  })
+  flushList()
+  return <div className="markdown-preview">{blocks.length ? blocks : <p className="empty-markdown">暂无改编内容</p>}</div>
+}
+
 function Detail({ taskId, onBack, onSettings }) {
   const [task, setTask] = useState(null)
   const [segments, setSegments] = useState([])
@@ -161,6 +198,7 @@ function Detail({ taskId, onBack, onSettings }) {
   const [dirty, setDirty] = useState(false)
   const [direction, setDirection] = useState('')
   const [action, setAction] = useState(null)
+  const [rewriteView, setRewriteView] = useState('preview')
   const [notice, setNotice] = useState('')
   const mediaRef = useRef(null)
   const load = useCallback(async () => {
@@ -224,15 +262,17 @@ function Detail({ taskId, onBack, onSettings }) {
       </section>
       <aside className="next-pane">
         <div><h2>下一步</h2><p>听写已完成。需要时再调用 AI，不会自动消耗额度。</p></div>
-        <article className="action-row"><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : '开始分析'}</button></article>
-        <article className="action-row visual-action"><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_status === 'completed' ? '重新分析' : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
-        <article className="action-row rewrite"><span className="action-icon"><PencilLine/></span><div><h3>复刻改编 <small className="expert-badge">文爆爆</small></h3><p>文爆爆会保留有效结构与节奏，生成新的口播文案</p></div><button className="outline compact coral-text" disabled={running} onClick={() => setAction('rewrite')}>开始改编</button></article>
-        {action === 'rewrite' && <div className="rewrite-form"><label>改编方向<textarea value={direction} onChange={e => setDirection(e.target.value)} placeholder="例如：改成面向新手的 60 秒口播，语气自然、有反差感"/></label><button className="primary compact" disabled={running} onClick={startRewrite}>生成新文案</button></div>}
+        <div className="action-grid">
+          <article className="action-row"><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : '开始分析'}</button></article>
+          <article className="action-row visual-action"><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_status === 'completed' ? '重新分析' : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
+          <article className="action-row rewrite"><span className="action-icon"><PencilLine/></span><div><h3>复刻改编 <small className="expert-badge">文爆爆</small></h3><p>文爆爆会保留有效结构与节奏，生成新的口播文案</p></div><button className="outline compact coral-text" disabled={running} onClick={() => setAction('rewrite')}>开始改编</button></article>
+          {action === 'rewrite' && <div className="rewrite-form"><label>改编方向<textarea value={direction} onChange={e => setDirection(e.target.value)} placeholder="例如：改成面向新手的 60 秒口播，语气自然、有反差感"/></label><button className="primary compact" disabled={running} onClick={startRewrite}>生成新文案</button></div>}
+        </div>
         {running && <div className="ai-running"><LoaderCircle className="spin" size={18}/>{task.ai_message}</div>}
         {task.ai_status === 'failed' && <div className="error-line">{task.ai_message}</div>}
-        {task.highlights?.length > 0 && <HighlightResults items={task.highlights}/>} 
+        {task.highlights?.length > 0 && <HighlightResults items={task.highlights}/>}
         {task.visual_analysis?.length > 0 && <VisualResults items={task.visual_analysis}/>}
-        {task.rewrite_text && <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>改编结果</b><button onClick={() => navigator.clipboard.writeText(task.rewrite_text)}><Copy size={16}/>复制</button></div><pre>{task.rewrite_text}</pre></div>}
+        {task.rewrite_text && <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>改编结果</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => navigator.clipboard.writeText(task.rewrite_text)}><Copy size={16}/>复制</button></div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea value={task.rewrite_text} onChange={event => setTask(current => ({...current, rewrite_text: event.target.value}))} spellCheck="false" /> : <MarkdownPreview value={task.rewrite_text}/>}</div></div>}
         <div className="ai-settings"><div><h3>AI 设置</h3><button onClick={onSettings}>更改</button></div><p><span className="gemini-mark">✦</span>首选 <b>Gemini</b></p><p><span className="gpt-mark">◎</span>备用 <b>GPT</b></p></div>
         <div className="retention"><span>原视频将在 24 小时后自动删除</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除</button>}</div>
         {notice && <div className="notice">{notice}</div>}
