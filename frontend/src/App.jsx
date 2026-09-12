@@ -311,6 +311,8 @@ function Detail({ taskId, onBack }) {
 function SettingsPage({ onBack, user }) {
   const [form, setForm] = useState(null)
   const [users, setUsers] = useState([])
+  const [douyinCookies, setDouyinCookies] = useState(null)
+  const [cookieBusy, setCookieBusy] = useState(false)
   const [newUser, setNewUser] = useState({username: '', password: ''})
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -318,7 +320,7 @@ function SettingsPage({ onBack, user }) {
   const [passwords, setPasswords] = useState({current: '', next: ''})
   useEffect(() => {
     if (user?.role !== 'admin') { setForm({}); return }
-    Promise.all([api.providerSettings(), api.adminUsers()]).then(([settings, accounts]) => { setForm(settings); setUsers(accounts) }).catch(err => setError(err.message))
+    Promise.all([api.providerSettings(), api.adminUsers(), api.douyinCookieStatus()]).then(([settings, accounts, cookieStatus]) => { setForm(settings); setUsers(accounts); setDouyinCookies(cookieStatus) }).catch(err => setError(err.message))
   }, [user])
   const set = (key, value) => setForm(current => ({...current, [key]: value}))
   const save = async (event) => {
@@ -342,6 +344,14 @@ function SettingsPage({ onBack, user }) {
       const account = await api.createUser(newUser.username, newUser.password)
       setUsers(current => [...current, account]); setNewUser({username: '', password: ''}); setMessage(`已创建账号 ${account.username}，请把初始密码安全发给朋友。`)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
+  const uploadCookies = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setCookieBusy(true); setMessage(''); setError('')
+    try { setDouyinCookies(await api.uploadDouyinCookies(file)); setMessage('抖音 Cookie 已安全保存，新的抖音链接任务会自动使用。') }
+    catch (err) { setError(err.message) } finally { setCookieBusy(false) }
   }
   if (!form) return <main className="loading-page"><LoaderCircle className="spin"/>加载接口设置</main>
   return <main className="settings-page shell">
@@ -371,6 +381,10 @@ function SettingsPage({ onBack, user }) {
           <label>备用模型<input value={form.llm_fallback_model} onChange={e => set('llm_fallback_model', e.target.value)} placeholder="GPT 模型名"/></label>
           <label className="wide">备用 Sub2API API Key（可选）<input type="password" value={form.sub2api_fallback_api_key || ''} onChange={e => set('sub2api_fallback_api_key', e.target.value)} placeholder={form.sub2api_fallback_api_key_configured ? '已配置，留空保持不变' : 'GPT 若属于其他分组，请填写绑定 OpenAI 分组的 Key'}/></label>
         </div>
+      </section>
+      <section><div className="settings-section-title"><h2>抖音下载</h2><p>建议使用小号。只保存浏览器导出的 Cookie，不保存账号密码。</p></div>
+        <div className="cookie-settings"><div><b>{douyinCookies?.configured ? '已配置抖音 Cookie' : '尚未配置抖音 Cookie'}</b><small>{douyinCookies?.configured ? `更新时间：${new Date(douyinCookies.updated_at).toLocaleString()}` : '抖音链接可能会提示需要新鲜 Cookie'}</small></div><label className="outline cookie-upload"><Upload size={17}/>选择 cookies.txt<input type="file" accept=".txt,.cookies,text/plain" onChange={uploadCookies} disabled={cookieBusy}/></label></div>
+        <p className="settings-note">在本机抖音登录小号后，用浏览器导出 Netscape 格式 cookies.txt，再在这里上传。Cookie 失效时重新导出即可。</p>
       </section>
       <section><div className="settings-section-title"><h2>朋友账号</h2><p>手动创建账号，不开放陌生人注册。</p></div>
         <div className="account-create"><input value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} placeholder="朋友用户名"/><input type="password" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} placeholder="初始密码（至少 12 位）"/><button type="button" className="outline" disabled={busy || newUser.username.trim().length < 3 || newUser.password.length < 12} onClick={createAccount}>创建账号</button></div>

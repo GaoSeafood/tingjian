@@ -3,6 +3,7 @@ import re
 import shutil
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
@@ -204,6 +205,41 @@ def put_provider_settings(body: ProviderSettingsBody, user: User = Depends(curre
         return update_provider_config(body.model_dump(exclude_none=True))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+
+
+@app.get("/api/settings/douyin-cookies")
+def get_douyin_cookie_status(user: User = Depends(admin_only)):
+    path = settings.douyin_cookie_file
+    if not path.is_file() or path.stat().st_size == 0:
+        return {"configured": False, "updated_at": None}
+    return {"configured": True, "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat()}
+
+
+@app.post("/api/settings/douyin-cookies")
+async def upload_douyin_cookies(cookies: UploadFile = File(...), user: User = Depends(admin_only)):
+    """Store an exported Netscape cookie file without exposing its contents."""
+    raw = await cookies.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise HTTPException(413, "Cookie 文件不能超过 1MB")
+    try:
+        text_content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(400, "Cookie 文件必须是 UTF-8 文本") from exc
+    lines = [line.strip() for line in text_content.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    if not lines or not any(line.count("\t") >= 6 for line in lines):
+        raise HTTPException(400, "请上传浏览器导出的 Netscape 格式 Cookie 文件（通常是 cookies.txt）")
+    path = settings.douyin_cookie_file
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(text_content, encoding="utf-8")
+        temp_path.chmod(0o600)
+        temp_path.replace(path)
+        path.chmod(0o600)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    return {"configured": True, "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat()}
 
 
 @app.get("/api/tasks")

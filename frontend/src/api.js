@@ -28,6 +28,12 @@ export const api = {
   saveProviderSettings: (settings) => request('/api/settings/providers', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
   }),
+  douyinCookieStatus: () => request('/api/settings/douyin-cookies'),
+  uploadDouyinCookies: (file) => {
+    const form = new FormData()
+    form.append('cookies', file)
+    return request('/api/settings/douyin-cookies', { method: 'POST', body: form })
+  },
   task: (id) => request(`/api/tasks/${id}`),
   upload: (file, language = 'auto') => {
     const form = new FormData()

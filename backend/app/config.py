@@ -29,6 +29,10 @@ class Settings:
     # providers while remaining comfortably below MiMo's payload limit.
     asr_chunk_seconds: int = int(os.getenv("ASR_CHUNK_SECONDS", "180"))
     url_audio_only_minutes: int = int(os.getenv("URL_AUDIO_ONLY_MINUTES", "45"))
+    # Netscape-format cookies exported from a dedicated Douyin account. The
+    # file lives in the persistent app-data volume and is never exposed via
+    # the API.
+    douyin_cookie_file: Path = Path(os.getenv("DOUYIN_COOKIE_FILE", str(Path(os.getenv("DATA_DIR", "/data")) / "secrets" / "douyin-cookies.txt")))
     visual_max_frames: int = int(os.getenv("VISUAL_MAX_FRAMES", "48"))
     visual_min_interval_seconds: int = int(os.getenv("VISUAL_MIN_INTERVAL_SECONDS", "4"))
     custom_asr_base_url: str = os.getenv("CUSTOM_ASR_BASE_URL", "")
@@ -44,3 +48,4 @@ class Settings:
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 (settings.data_dir / "tasks").mkdir(parents=True, exist_ok=True)
+settings.douyin_cookie_file.parent.mkdir(parents=True, exist_ok=True)

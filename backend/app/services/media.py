@@ -89,11 +89,29 @@ def source_platform_label(url: str | None) -> str:
     return "视频链接"
 
 
+def _cookie_file_for_url(url: str) -> str | None:
+    """Return the persisted Douyin cookie file only for Douyin requests."""
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    is_douyin = host == "douyin.com" or host.endswith(".douyin.com") or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")
+    if is_douyin and settings.douyin_cookie_file.is_file() and settings.douyin_cookie_file.stat().st_size > 0:
+        return str(settings.douyin_cookie_file)
+    return None
+
+
+def _yt_dlp_options(url: str, **overrides) -> dict:
+    options = {"noplaylist": True, "quiet": True, "socket_timeout": 30}
+    cookie_file = _cookie_file_for_url(url)
+    if cookie_file:
+        options["cookiefile"] = cookie_file
+    options.update(overrides)
+    return options
+
+
 def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool]:
     normalized_url = validate_public_url(url)
     audio_only = False
     try:
-        with yt_dlp.YoutubeDL({"noplaylist": True, "quiet": True, "socket_timeout": 30}) as ydl:
+        with yt_dlp.YoutubeDL(_yt_dlp_options(normalized_url)) as ydl:
             info = ydl.extract_info(normalized_url, download=False)
             duration = float(info.get("duration") or 0)
             audio_only = duration >= settings.url_audio_only_minutes * 60
@@ -102,22 +120,25 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool]:
         # lookup is only a hint used to avoid downloading a huge video.
         pass
     output = str(task_dir / "source.%(ext)s")
-    opts = {
+    opts = _yt_dlp_options(normalized_url, **{
         "outtmpl": output,
         "format": "bestaudio/best" if audio_only else "bv*+ba/b",
-        "noplaylist": True,
         "max_filesize": settings.max_upload_mb * 1024 * 1024,
-        "socket_timeout": 30,
         "retries": 3,
-        "quiet": True,
-    }
+    })
     if not audio_only:
         opts["merge_output_format"] = "mp4"
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(normalized_url, download=True)
-        title = info.get("title") or "网络视频"
-        requested = info.get("requested_downloads") or []
-        candidate = requested[0].get("filepath") if requested else None
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(normalized_url, download=True)
+    except Exception as exc:
+        detail = str(exc)
+        if "Fresh cookies" in detail or "cookies" in detail.lower():
+            raise RuntimeError("抖音需要新鲜的登录 Cookie，请管理员在设置中更新抖音 Cookie 文件") from exc
+        raise
+    title = info.get("title") or "网络视频"
+    requested = info.get("requested_downloads") or []
+    candidate = requested[0].get("filepath") if requested else None
     if candidate and Path(candidate).exists():
         return Path(candidate), title, audio_only
     matches = sorted(task_dir.glob("source.*"))
