@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+import re
 import time
 from pathlib import Path
 
@@ -47,6 +48,11 @@ class ASRClient:
             language = self.config.get("asr_language")
             if language and language != "auto":
                 body["language_code"] = "zh" if language == "zh" else language
+            else:
+                # AssemblyAI defaults to English when neither language_code
+                # nor language_detection is supplied. Explicitly enable
+                # detection so Mandarin recordings are segmented correctly.
+                body["language_detection"] = True
             submit = requests.post(
                 f"{base_url}/v2/transcript",
                 headers={**headers, "content-type": "application/json"},
@@ -84,7 +90,7 @@ class ASRClient:
             try:
                 start = float(item.get("start", 0)) / 1000
                 end = float(item.get("end", 0)) / 1000
-                text = str(item.get("text", "")).strip()
+                text = ASRClient._normalize_text(item.get("text", ""))
             except (TypeError, ValueError):
                 continue
             if not text or end <= start:
@@ -94,7 +100,7 @@ class ASRClient:
             if speaker:
                 segment["speaker"] = f"说话人 {speaker}"
             segments.append(segment)
-        text = str(payload.get("text", "")).strip()
+        text = ASRClient._normalize_text(payload.get("text", ""))
         if segments and any(item.get("speaker") for item in segments):
             # Keep speaker labels in the plain-text transcript as well, so
             # TXT export and downstream LLM features retain the dialogue
@@ -106,6 +112,15 @@ class ASRClient:
         elif not text and segments:
             text = "\n".join(item["text"] for item in segments)
         return {"text": text, "segments": segments}
+
+    @staticmethod
+    def _normalize_text(value: object) -> str:
+        """Remove tokenization spaces inserted between adjacent CJK chars."""
+        text = str(value or "").strip()
+        text = re.sub(r"(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])", "", text)
+        text = re.sub(r"\s+([，。！？、；：,.!?;:])", r"\1", text)
+        text = re.sub(r"([（【“‘])\s+", r"\1", text)
+        return text.strip()
 
     def _mimo(self, audio_path: Path) -> dict:
         if not self.config["mimo_api_key"]:
