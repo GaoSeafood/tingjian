@@ -91,15 +91,17 @@ def transcribe_task(task_id: str):
             # not split it into independent jobs, otherwise speaker labels can
             # restart in every chunk (Speaker A in one chunk may be Speaker B
             # in the next). Other providers keep the existing chunk strategy.
-            if client.config["asr_provider"] == "assemblyai":
+            diarization_provider = client.config["asr_provider"] in {"assemblyai", "tencent"}
+            if diarization_provider and duration <= 2 * 60 * 60:
                 chunks = [extract_audio(media_path, task_dir)]
             else:
                 chunks = split_audio(media_path, task_dir, settings.asr_chunk_seconds)
             segments = []
             text_parts = []
             for index, chunk in enumerate(chunks):
-                start_s = 0 if client.config["asr_provider"] == "assemblyai" else index * settings.asr_chunk_seconds
-                end_s = duration if client.config["asr_provider"] == "assemblyai" else min(duration, (index + 1) * settings.asr_chunk_seconds)
+                whole_recording = diarization_provider and duration <= 2 * 60 * 60
+                start_s = 0 if whole_recording else index * settings.asr_chunk_seconds
+                end_s = duration if whole_recording else min(duration, (index + 1) * settings.asr_chunk_seconds)
                 pct = 18 + int((index / len(chunks)) * 76)
                 _update(db, task, status="transcribing", progress=pct, message=f"正在听写第 {index + 1}/{len(chunks)} 段")
                 result = client.transcribe(chunk)

@@ -1,8 +1,11 @@
 import base64
+import hashlib
+import hmac
 import mimetypes
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 import requests
 
@@ -18,7 +21,109 @@ class ASRClient:
             return self._mimo(audio_path)
         if self.config["asr_provider"] == "assemblyai":
             return self._assemblyai(audio_path)
+        if self.config["asr_provider"] == "tencent":
+            return self._tencent(audio_path)
         return self._openai_transcription(audio_path)
+
+    def _tencent(self, audio_path: Path) -> dict:
+        """Call Tencent Cloud ASR Flash Recognition with speaker diarization."""
+        app_id = str(self.config.get("tencent_app_id") or "").strip()
+        secret_id = str(self.config.get("tencent_secret_id") or "").strip()
+        secret_key = str(self.config.get("tencent_secret_key") or "").strip()
+        if not app_id or not secret_id or not secret_key:
+            raise RuntimeError("腾讯云 ASR 尚未配置 AppID、SecretID 或 SecretKey")
+
+        # Tencent's flash endpoint signs the exact POST host/path/query string.
+        # Keep query parameters deterministic so signatures are reproducible.
+        params = {
+            "convert_num_mode": "1",
+            "engine_type": self.config.get("tencent_engine_type") or "16k_zh",
+            "filter_dirty": "0",
+            "filter_modal": "0",
+            "filter_punc": "0",
+            "first_channel_only": "1",
+            "hotword_id": "",
+            "secretid": secret_id,
+            "speaker_diarization": "1",
+            "timestamp": str(int(time.time())),
+            "voice_format": audio_path.suffix.lower().lstrip(".") or "mp3",
+            "word_info": "1",
+        }
+        query = urlencode(params)
+        host = "asr.cloud.tencent.com"
+        path = f"/asr/flash/v1/{app_id}"
+        sign_text = f"POST{host}{path}?{query}"
+        signature = base64.b64encode(
+            hmac.new(secret_key.encode(), sign_text.encode(), hashlib.sha1).digest()
+        ).decode()
+        url = f"https://{host}{path}?{query}"
+        try:
+            with audio_path.open("rb") as handle:
+                response = requests.post(
+                    url,
+                    headers={
+                        "Authorization": signature,
+                        "Content-Type": "application/octet-stream",
+                    },
+                    data=handle,
+                    timeout=60 * 60,
+                )
+        except requests.RequestException as exc:
+            raise RuntimeError(f"腾讯云 ASR 网络请求失败：{exc}") from exc
+        if response.status_code != 200:
+            raise RuntimeError(f"腾讯云 ASR 请求失败 ({response.status_code}): {response.text[:500]}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError(f"腾讯云 ASR 返回了无效响应：{response.text[:300]}") from exc
+        if payload.get("code", 0) not in (0, "0", None):
+            raise RuntimeError(f"腾讯云 ASR 失败（{payload.get('code')}）：{payload.get('message') or '未知错误'}")
+        return self._tencent_result(payload)
+
+    @staticmethod
+    def _tencent_result(payload: dict) -> dict:
+        segments = []
+        plain_parts = []
+        for channel in payload.get("flash_result") or []:
+            sentence_list = channel.get("sentence_list") or []
+            if not sentence_list and channel.get("text"):
+                plain_parts.append(ASRClient._normalize_text(channel.get("text")))
+                continue
+            for sentence in sentence_list:
+                try:
+                    start = float(sentence.get("start_time", 0)) / 1000
+                    end = float(sentence.get("end_time", 0)) / 1000
+                except (TypeError, ValueError):
+                    continue
+                text = ASRClient._normalize_text(sentence.get("text", ""))
+                if not text or end <= start:
+                    continue
+                speaker_id = sentence.get("speaker_id")
+                speaker = ASRClient._speaker_label(speaker_id)
+                item = {
+                    "start_seconds": start,
+                    "end_seconds": end,
+                    "text": text,
+                    "speaker": speaker,
+                }
+                segments.append(item)
+                plain_parts.append(f"[{speaker}] {text}")
+        if not segments:
+            text = ASRClient._normalize_text(payload.get("text", ""))
+        else:
+            text = "\n".join(plain_parts)
+        return {"text": text, "segments": segments}
+
+    @staticmethod
+    def _speaker_label(value: object) -> str:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return "说话人 A"
+        # Tencent IDs start at 0; present the friendlier A/B/C labels in UI.
+        if 0 <= number < 26:
+            return f"说话人 {chr(ord('A') + number)}"
+        return f"说话人 {number + 1}"
 
     def _assemblyai(self, audio_path: Path) -> dict:
         api_key = self.config.get("assemblyai_api_key")

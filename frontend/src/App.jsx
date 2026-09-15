@@ -284,7 +284,7 @@ function Detail({ taskId, onBack }) {
   const hasVisualStyle = task.visual_analysis?.some(item => item.kind === 'style_analysis')
   return <main className="detail shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
-    <div className="detail-head"><div><h1>{task.title} <small className="title-date">· {sourceDate(task.created_at)}</small></h1><p>{clock(task.duration)} · {task.source_platform || '本地文件'} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : task.asr_provider === 'assemblyai' ? 'AssemblyAI（说话人标记）' : '自定义 ASR'} · 听写完成</p></div>
+    <div className="detail-head"><div><h1>{task.title} <small className="title-date">· {sourceDate(task.created_at)}</small></h1><p>{clock(task.duration)} · {task.source_platform || '本地文件'} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : task.asr_provider === 'assemblyai' ? 'AssemblyAI（说话人标记）' : task.asr_provider === 'tencent' ? '腾讯云 ASR（说话人标记）' : '自定义 ASR'} · 听写完成</p></div>
       <div><a className="outline" href={`/api/tasks/${task.id}/export/txt`}><Download size={18}/>导出</a></div></div>
     <div className="mobile-pane-tabs" role="tablist" aria-label="详情视图"><button className={mobilePane === 'source' ? 'active' : ''} onClick={() => setMobilePane('source')}>原视频与听写</button><button className={mobilePane === 'ai' ? 'active' : ''} onClick={() => setMobilePane('ai')}>AI 工作区</button></div>
     <div className="workspace">
@@ -340,7 +340,7 @@ function SettingsPage({ onBack, user }) {
     event.preventDefault(); setBusy(true); setMessage(''); setError('')
     try {
       const payload = {...form}
-      delete payload.mimo_api_key_configured; delete payload.custom_asr_api_key_configured; delete payload.assemblyai_api_key_configured; delete payload.sub2api_api_key_configured; delete payload.sub2api_fallback_api_key_configured
+      delete payload.mimo_api_key_configured; delete payload.custom_asr_api_key_configured; delete payload.assemblyai_api_key_configured; delete payload.tencent_secret_id_configured; delete payload.tencent_secret_key_configured; delete payload.sub2api_api_key_configured; delete payload.sub2api_fallback_api_key_configured
       setForm(await api.saveProviderSettings(payload)); setMessage('接口设置已安全保存，新任务会立即使用。')
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
@@ -373,12 +373,18 @@ function SettingsPage({ onBack, user }) {
     <form className="settings-form" onSubmit={user?.role === 'admin' ? save : event => event.preventDefault()}>
       {user?.role === 'admin' && <><section><div className="settings-section-title"><h2>语音听写</h2><p>ASR 密钥只由管理员维护，朋友无法查看。</p></div>
         <div className="field-grid">
-          <label>ASR 服务<select value={form.asr_provider} onChange={e => set('asr_provider', e.target.value)}><option value="mimo">小米 MiMo</option><option value="assemblyai">AssemblyAI（说话人标记）</option><option value="custom">自定义 Whisper 兼容接口</option></select></label>
+          <label>ASR 服务<select value={form.asr_provider} onChange={e => set('asr_provider', e.target.value)}><option value="mimo">小米 MiMo</option><option value="tencent">腾讯云 ASR（说话人标记）</option><option value="assemblyai">AssemblyAI（说话人标记）</option><option value="custom">自定义 Whisper 兼容接口</option></select></label>
           <label>识别语言<select value={form.asr_language} onChange={e => set('asr_language', e.target.value)}><option value="auto">自动识别</option><option value="zh">中文</option><option value="en">英文</option></select></label>
           {form.asr_provider === 'mimo' ? <>
             <label className="wide">MiMo Base URL<input value={form.mimo_base_url} onChange={e => set('mimo_base_url', e.target.value)}/></label>
             <label>MiMo 模型<input value={form.mimo_model} onChange={e => set('mimo_model', e.target.value)}/></label>
             <label>MiMo API Key<input type="password" value={form.mimo_api_key || ''} onChange={e => set('mimo_api_key', e.target.value)} placeholder={form.mimo_api_key_configured ? '已配置，留空保持不变' : '请输入 API Key'}/></label>
+          </> : form.asr_provider === 'tencent' ? <>
+            <label>腾讯云 AppID<input value={form.tencent_app_id || ''} onChange={e => set('tencent_app_id', e.target.value)} placeholder="例如 1250000000"/></label>
+            <label>引擎<select value={form.tencent_engine_type || '16k_zh'} onChange={e => set('tencent_engine_type', e.target.value)}><option value="16k_zh">16k_zh 中文普通话</option><option value="16k_zh_en">16k_zh_en 中英混合</option></select></label>
+            <label>腾讯云 SecretID<input type="password" value={form.tencent_secret_id || ''} onChange={e => set('tencent_secret_id', e.target.value)} placeholder={form.tencent_secret_id_configured ? '已配置，留空保持不变' : '请输入 SecretID'}/></label>
+            <label>腾讯云 SecretKey<input type="password" value={form.tencent_secret_key || ''} onChange={e => set('tencent_secret_key', e.target.value)} placeholder={form.tencent_secret_key_configured ? '已配置，留空保持不变' : '请输入 SecretKey'}/></label>
+            <p className="settings-note wide">已开启说话人分离。腾讯云极速接口支持 2 小时以内音频整段识别；更长音频会自动分段。</p>
           </> : form.asr_provider === 'assemblyai' ? <>
             <label className="wide">AssemblyAI Base URL<input value={form.assemblyai_base_url} onChange={e => set('assemblyai_base_url', e.target.value)} placeholder="https://api.assemblyai.com"/></label>
             <label>模型<input value={form.assemblyai_model} onChange={e => set('assemblyai_model', e.target.value)} placeholder="universal-2"/></label>

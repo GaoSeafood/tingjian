@@ -52,6 +52,10 @@ class ProviderSettingsBody(BaseModel):
     assemblyai_base_url: str | None = None
     assemblyai_api_key: str | None = None
     assemblyai_model: str | None = None
+    tencent_app_id: str | None = None
+    tencent_secret_id: str | None = None
+    tencent_secret_key: str | None = None
+    tencent_engine_type: str | None = None
     sub2api_base_url: str | None = None
     sub2api_api_key: str | None = None
     sub2api_fallback_api_key: str | None = None
@@ -134,7 +138,13 @@ def admin_only(user: User = Depends(current_user)) -> User:
 @app.get("/api/health")
 def health():
     cfg = provider_config()
-    return {"ok": True, "asr": cfg["asr_provider"], "mimo_configured": bool(cfg["mimo_api_key"]), "llm_configured": bool(cfg["sub2api_api_key"])}
+    return {
+        "ok": True,
+        "asr": cfg["asr_provider"],
+        "mimo_configured": bool(cfg["mimo_api_key"]),
+        "tencent_configured": bool(cfg["tencent_app_id"] and cfg["tencent_secret_id"] and cfg["tencent_secret_key"]),
+        "llm_configured": bool(cfg["sub2api_api_key"]),
+    }
 
 
 @app.post("/api/auth/login")
