@@ -6,9 +6,11 @@ import re
 import shutil
 import socket
 import subprocess
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+import requests
 import yt_dlp
 
 from ..config import settings
@@ -99,7 +101,20 @@ def _cookie_file_for_url(url: str) -> str | None:
 
 
 def _yt_dlp_options(url: str, **overrides) -> dict:
-    options = {"noplaylist": True, "quiet": True, "socket_timeout": 30}
+    options = {
+        "noplaylist": True,
+        "quiet": True,
+        # Some CDN edges take longer than the default probe timeout to return
+        # headers.  Direct media URLs use the streaming downloader below, but
+        # keep a more forgiving timeout for platform pages.
+        "socket_timeout": 60,
+        "retries": 5,
+        "fragment_retries": 5,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+            "Accept": "*/*",
+        },
+    }
     cookie_file = _cookie_file_for_url(url)
     if cookie_file:
         options["cookiefile"] = cookie_file
@@ -107,8 +122,71 @@ def _yt_dlp_options(url: str, **overrides) -> dict:
     return options
 
 
+def _is_direct_media_url(url: str) -> bool:
+    """Return True for a URL that points straight at a media file.
+
+    CDN links (for example, ByteDance TOS signed .mp4 URLs) are not platform
+    pages. Running yt-dlp's generic webpage extractor against them adds an
+    unnecessary probe which can hang on an otherwise healthy CDN response.
+    """
+    path = urlparse(url).path.lower()
+    return path.endswith(tuple(AUDIO_SUFFIXES | VIDEO_SUFFIXES))
+
+
+def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool]:
+    """Stream a direct media URL to disk with CDN-friendly retries."""
+    parsed = urlparse(url)
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix not in AUDIO_SUFFIXES | VIDEO_SUFFIXES:
+        suffix = ".mp4"
+    output = task_dir / f"source{suffix}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Encoding": "identity",
+    }
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    last_error: Exception | None = None
+    for attempt in range(4):
+        try:
+            with requests.get(
+                url,
+                headers=headers,
+                stream=True,
+                allow_redirects=True,
+                timeout=(20, 120),
+            ) as response:
+                if response.status_code not in (200, 206):
+                    raise RuntimeError(f"直链服务器返回 HTTP {response.status_code}")
+                content_length = int(response.headers.get("content-length") or 0)
+                if content_length > max_bytes:
+                    raise RuntimeError(f"视频文件超过 {settings.max_upload_mb} MB 限制")
+                written = 0
+                with output.open("wb") as handle:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if not chunk:
+                            continue
+                        written += len(chunk)
+                        if written > max_bytes:
+                            raise RuntimeError(f"视频文件超过 {settings.max_upload_mb} MB 限制")
+                        handle.write(chunk)
+            if written <= 0:
+                raise RuntimeError("直链响应为空")
+            final_path = Path(urlparse(response.url).path)
+            title = final_path.stem or "网络视频"
+            return output, title, suffix in AUDIO_SUFFIXES
+        except (requests.RequestException, OSError, RuntimeError) as exc:
+            last_error = exc
+            output.unlink(missing_ok=True)
+            if attempt < 3:
+                time.sleep(min(2 ** attempt, 8))
+    raise RuntimeError(f"直链下载失败：{last_error}") from last_error
+
+
 def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool]:
     normalized_url = validate_public_url(url)
+    if _is_direct_media_url(normalized_url):
+        return _download_direct_media(normalized_url, task_dir)
     audio_only = False
     try:
         with yt_dlp.YoutubeDL(_yt_dlp_options(normalized_url)) as ydl:
