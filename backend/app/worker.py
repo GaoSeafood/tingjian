@@ -8,6 +8,9 @@ from .config import settings
 
 redis = Redis.from_url(settings.redis_url)
 queue = Queue("tingjian", connection=redis, default_timeout=settings.job_timeout_seconds)
+# AI actions live on their own queue so a slow URL download or long ASR job
+# cannot leave a user-facing rewrite/highlight request waiting indefinitely.
+ai_queue = Queue("tingjian-ai", connection=redis, default_timeout=settings.job_timeout_seconds)
 
 
 def transcription_failure(job, connection, exc_type, exc_value, traceback):
@@ -43,4 +46,5 @@ def enqueue(func, *args):
     options = {"job_timeout": settings.job_timeout_seconds, "result_ttl": 86400, "failure_ttl": 604800}
     if getattr(func, "__name__", "") == "transcribe_task":
         options["on_failure"] = transcription_failure
-    return queue.enqueue(func, *args, **options)
+    target = ai_queue if getattr(func, "__name__", "") in {"highlight_task", "analyze_visual_task", "rewrite_task"} else queue
+    return target.enqueue(func, *args, **options)

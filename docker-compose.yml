@@ -43,6 +43,28 @@ services:
       redis:
         condition: service_healthy
 
+  # Keep AI actions independent from video downloads and ASR.  The second
+  # queue name is included temporarily so jobs queued by older deployments
+  # are drained during the rolling update.
+  worker-ai:
+    build: .
+    restart: unless-stopped
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "tingjian-ai", "tingjian", "--with-scheduler"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://tingjian:${POSTGRES_PASSWORD}@db:5432/tingjian
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+    volumes:
+      - app-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -74,4 +96,3 @@ volumes:
   app-data:
   postgres-data:
   redis-data:
-
