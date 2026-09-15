@@ -9,7 +9,7 @@ from .database import SessionLocal
 from .models import AppSetting
 
 
-SECRET_KEYS = {"mimo_api_key", "custom_asr_api_key", "sub2api_api_key", "sub2api_fallback_api_key"}
+SECRET_KEYS = {"mimo_api_key", "custom_asr_api_key", "assemblyai_api_key", "sub2api_api_key", "sub2api_fallback_api_key"}
 
 
 def _fernet() -> Fernet:
@@ -38,6 +38,9 @@ def provider_config() -> dict:
         "custom_asr_base_url": settings.custom_asr_base_url,
         "custom_asr_api_key": settings.custom_asr_api_key,
         "custom_asr_model": settings.custom_asr_model,
+        "assemblyai_base_url": settings.assemblyai_base_url,
+        "assemblyai_api_key": settings.assemblyai_api_key,
+        "assemblyai_model": settings.assemblyai_model,
         "sub2api_base_url": settings.sub2api_base_url,
         "sub2api_api_key": settings.sub2api_api_key,
         "sub2api_fallback_api_key": settings.sub2api_fallback_api_key,
@@ -55,6 +58,7 @@ def update_provider_config(values: dict) -> dict:
     allowed = {
         "asr_provider", "mimo_api_key", "mimo_base_url", "mimo_model", "asr_language",
         "custom_asr_base_url", "custom_asr_api_key", "custom_asr_model",
+        "assemblyai_base_url", "assemblyai_api_key", "assemblyai_model",
         "sub2api_base_url", "sub2api_api_key", "sub2api_fallback_api_key", "llm_primary_model", "llm_fallback_model",
     }
     with SessionLocal() as db:
@@ -87,6 +91,9 @@ def public_provider_config() -> dict:
         "custom_asr_base_url": cfg["custom_asr_base_url"],
         "custom_asr_model": cfg["custom_asr_model"],
         "custom_asr_api_key_configured": bool(cfg["custom_asr_api_key"]),
+        "assemblyai_base_url": cfg["assemblyai_base_url"],
+        "assemblyai_model": cfg["assemblyai_model"],
+        "assemblyai_api_key_configured": bool(cfg["assemblyai_api_key"]),
         "sub2api_base_url": cfg["sub2api_base_url"],
         "sub2api_api_key_configured": bool(cfg["sub2api_api_key"]),
         "sub2api_fallback_api_key_configured": bool(cfg["sub2api_fallback_api_key"]),

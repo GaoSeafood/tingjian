@@ -122,7 +122,10 @@ function Home({ tasks, refresh, onOpen }) {
 
 function TranscriptEditor({ segments, showTimes, onChange }) {
   const areaRef = useRef(null)
-  const value = segments.map(segment => showTimes ? `[${segment.start}] ${segment.text}` : segment.text).join('\n')
+  const value = segments.map(segment => {
+    const speaker = segment.speaker ? `[${segment.speaker}] ` : ''
+    return `${showTimes ? `[${segment.start}] ` : ''}${speaker}${segment.text}`
+  }).join('\n')
   useEffect(() => {
     const area = areaRef.current
     if (!area) return
@@ -133,7 +136,11 @@ function TranscriptEditor({ segments, showTimes, onChange }) {
     const lines = event.target.value.split(/\r?\n/)
     onChange(lines.map((line, index) => {
       const base = segments[index] || { start: '', end: '', start_seconds: 0, end_seconds: 0 }
-      const text = showTimes ? line.replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, '') : line
+      let text = showTimes ? line.replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, '') : line
+      if (base.speaker) {
+        const escapedSpeaker = base.speaker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        text = text.replace(new RegExp(`^\\s*\\[${escapedSpeaker}\\]\\s*`), '')
+      }
       return {...base, text}
     }))
   }
@@ -277,7 +284,7 @@ function Detail({ taskId, onBack }) {
   const hasVisualStyle = task.visual_analysis?.some(item => item.kind === 'style_analysis')
   return <main className="detail shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
-    <div className="detail-head"><div><h1>{task.title} <small className="title-date">· {sourceDate(task.created_at)}</small></h1><p>{clock(task.duration)} · {task.source_platform || '本地文件'} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : '自定义 ASR'} · 听写完成</p></div>
+    <div className="detail-head"><div><h1>{task.title} <small className="title-date">· {sourceDate(task.created_at)}</small></h1><p>{clock(task.duration)} · {task.source_platform || '本地文件'} · 中文 · {task.asr_provider === 'mimo' ? 'MiMo-V2.5-ASR' : task.asr_provider === 'assemblyai' ? 'AssemblyAI（说话人标记）' : '自定义 ASR'} · 听写完成</p></div>
       <div><a className="outline" href={`/api/tasks/${task.id}/export/txt`}><Download size={18}/>导出</a></div></div>
     <div className="mobile-pane-tabs" role="tablist" aria-label="详情视图"><button className={mobilePane === 'source' ? 'active' : ''} onClick={() => setMobilePane('source')}>原视频与听写</button><button className={mobilePane === 'ai' ? 'active' : ''} onClick={() => setMobilePane('ai')}>AI 工作区</button></div>
     <div className="workspace">
@@ -333,7 +340,7 @@ function SettingsPage({ onBack, user }) {
     event.preventDefault(); setBusy(true); setMessage(''); setError('')
     try {
       const payload = {...form}
-      delete payload.mimo_api_key_configured; delete payload.custom_asr_api_key_configured; delete payload.sub2api_api_key_configured; delete payload.sub2api_fallback_api_key_configured
+      delete payload.mimo_api_key_configured; delete payload.custom_asr_api_key_configured; delete payload.assemblyai_api_key_configured; delete payload.sub2api_api_key_configured; delete payload.sub2api_fallback_api_key_configured
       setForm(await api.saveProviderSettings(payload)); setMessage('接口设置已安全保存，新任务会立即使用。')
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
@@ -366,12 +373,16 @@ function SettingsPage({ onBack, user }) {
     <form className="settings-form" onSubmit={user?.role === 'admin' ? save : event => event.preventDefault()}>
       {user?.role === 'admin' && <><section><div className="settings-section-title"><h2>语音听写</h2><p>ASR 密钥只由管理员维护，朋友无法查看。</p></div>
         <div className="field-grid">
-          <label>ASR 服务<select value={form.asr_provider} onChange={e => set('asr_provider', e.target.value)}><option value="mimo">小米 MiMo</option><option value="custom">自定义 Whisper 兼容接口</option></select></label>
+          <label>ASR 服务<select value={form.asr_provider} onChange={e => set('asr_provider', e.target.value)}><option value="mimo">小米 MiMo</option><option value="assemblyai">AssemblyAI（说话人标记）</option><option value="custom">自定义 Whisper 兼容接口</option></select></label>
           <label>识别语言<select value={form.asr_language} onChange={e => set('asr_language', e.target.value)}><option value="auto">自动识别</option><option value="zh">中文</option><option value="en">英文</option></select></label>
           {form.asr_provider === 'mimo' ? <>
             <label className="wide">MiMo Base URL<input value={form.mimo_base_url} onChange={e => set('mimo_base_url', e.target.value)}/></label>
             <label>MiMo 模型<input value={form.mimo_model} onChange={e => set('mimo_model', e.target.value)}/></label>
             <label>MiMo API Key<input type="password" value={form.mimo_api_key || ''} onChange={e => set('mimo_api_key', e.target.value)} placeholder={form.mimo_api_key_configured ? '已配置，留空保持不变' : '请输入 API Key'}/></label>
+          </> : form.asr_provider === 'assemblyai' ? <>
+            <label className="wide">AssemblyAI Base URL<input value={form.assemblyai_base_url} onChange={e => set('assemblyai_base_url', e.target.value)} placeholder="https://api.assemblyai.com"/></label>
+            <label>模型<input value={form.assemblyai_model} onChange={e => set('assemblyai_model', e.target.value)} placeholder="universal-2"/></label>
+            <label>AssemblyAI API Key<input type="password" value={form.assemblyai_api_key || ''} onChange={e => set('assemblyai_api_key', e.target.value)} placeholder={form.assemblyai_api_key_configured ? '已配置，留空保持不变' : '请输入 API Key'}/></label>
           </> : <>
             <label className="wide">自定义 ASR Base URL<input value={form.custom_asr_base_url} onChange={e => set('custom_asr_base_url', e.target.value)} placeholder="https://example.com/v1"/></label>
             <label>模型<input value={form.custom_asr_model} onChange={e => set('custom_asr_model', e.target.value)}/></label>

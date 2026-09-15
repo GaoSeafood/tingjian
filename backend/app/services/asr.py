@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+import time
 from pathlib import Path
 
 import requests
@@ -14,7 +15,97 @@ class ASRClient:
     def transcribe(self, audio_path: Path) -> dict:
         if self.config["asr_provider"] == "mimo":
             return self._mimo(audio_path)
+        if self.config["asr_provider"] == "assemblyai":
+            return self._assemblyai(audio_path)
         return self._openai_transcription(audio_path)
+
+    def _assemblyai(self, audio_path: Path) -> dict:
+        api_key = self.config.get("assemblyai_api_key")
+        if not api_key:
+            raise RuntimeError("AssemblyAI 尚未配置 API Key")
+        base_url = self.config.get("assemblyai_base_url", "https://api.assemblyai.com").rstrip("/")
+        headers = {"authorization": api_key}
+        try:
+            with audio_path.open("rb") as handle:
+                upload = requests.post(
+                    f"{base_url}/v2/upload",
+                    headers={**headers, "content-type": "application/octet-stream"},
+                    data=handle,
+                    timeout=600,
+                )
+            if upload.status_code not in (200, 201):
+                raise RuntimeError(f"AssemblyAI 上传失败 ({upload.status_code}): {upload.text[:400]}")
+            audio_url = upload.json().get("upload_url")
+            if not audio_url:
+                raise RuntimeError("AssemblyAI 未返回音频地址")
+
+            body = {
+                "audio_url": audio_url,
+                "speech_models": [self.config.get("assemblyai_model") or "universal-2"],
+                "speaker_labels": True,
+            }
+            language = self.config.get("asr_language")
+            if language and language != "auto":
+                body["language_code"] = "zh" if language == "zh" else language
+            submit = requests.post(
+                f"{base_url}/v2/transcript",
+                headers={**headers, "content-type": "application/json"},
+                json=body,
+                timeout=120,
+            )
+            if submit.status_code not in (200, 201):
+                raise RuntimeError(f"AssemblyAI 创建任务失败 ({submit.status_code}): {submit.text[:400]}")
+            transcript_id = submit.json().get("id")
+            if not transcript_id:
+                raise RuntimeError("AssemblyAI 未返回任务 ID")
+
+            deadline = time.monotonic() + 2 * 60 * 60
+            while time.monotonic() < deadline:
+                result = requests.get(
+                    f"{base_url}/v2/transcript/{transcript_id}", headers=headers, timeout=120,
+                )
+                if result.status_code != 200:
+                    raise RuntimeError(f"AssemblyAI 查询失败 ({result.status_code}): {result.text[:400]}")
+                payload = result.json()
+                status = payload.get("status")
+                if status == "completed":
+                    return self._assemblyai_result(payload)
+                if status == "error":
+                    raise RuntimeError(f"AssemblyAI 转写失败：{payload.get('error') or '未知错误'}")
+                time.sleep(3)
+            raise RuntimeError("AssemblyAI 转写超时（超过 2 小时）")
+        except requests.RequestException as exc:
+            raise RuntimeError(f"AssemblyAI 网络请求失败：{exc}") from exc
+
+    @staticmethod
+    def _assemblyai_result(payload: dict) -> dict:
+        segments = []
+        for item in payload.get("utterances") or []:
+            try:
+                start = float(item.get("start", 0)) / 1000
+                end = float(item.get("end", 0)) / 1000
+                text = str(item.get("text", "")).strip()
+            except (TypeError, ValueError):
+                continue
+            if not text or end <= start:
+                continue
+            speaker = str(item.get("speaker") or "").strip()
+            segment = {"start_seconds": start, "end_seconds": end, "text": text}
+            if speaker:
+                segment["speaker"] = f"说话人 {speaker}"
+            segments.append(segment)
+        text = str(payload.get("text", "")).strip()
+        if segments and any(item.get("speaker") for item in segments):
+            # Keep speaker labels in the plain-text transcript as well, so
+            # TXT export and downstream LLM features retain the dialogue
+            # structure instead of silently flattening it.
+            text = "\n".join(
+                f"[{item.get('speaker')}] {item['text']}" if item.get("speaker") else item["text"]
+                for item in segments
+            )
+        elif not text and segments:
+            text = "\n".join(item["text"] for item in segments)
+        return {"text": text, "segments": segments}
 
     def _mimo(self, audio_path: Path) -> dict:
         if not self.config["mimo_api_key"]:

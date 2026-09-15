@@ -10,7 +10,7 @@ from .database import SessionLocal
 from .models import Task, utcnow
 from .services.asr import ASRClient
 from .services.llm import find_highlights, rewrite_script
-from .services.media import download_video, ensure_browser_preview, media_kind, probe_duration, split_audio
+from .services.media import download_video, ensure_browser_preview, extract_audio, media_kind, probe_duration, split_audio
 from .services.vision import analyze_visuals
 
 
@@ -84,15 +84,22 @@ def transcribe_task(task_id: str):
                     pass
             extraction_message = "正在提取音频（长视频模式）" if audio_only or long_media or media_kind(media_path) == "audio" else "正在提取音频"
             _update(db, task, duration=duration, progress=14, message=extraction_message)
-            chunks = split_audio(media_path, task_dir, settings.asr_chunk_seconds)
             client = ASRClient()
             task.asr_provider = client.config["asr_provider"]
             db.commit()
+            # AssemblyAI performs diarization over the complete recording. Do
+            # not split it into independent jobs, otherwise speaker labels can
+            # restart in every chunk (Speaker A in one chunk may be Speaker B
+            # in the next). Other providers keep the existing chunk strategy.
+            if client.config["asr_provider"] == "assemblyai":
+                chunks = [extract_audio(media_path, task_dir)]
+            else:
+                chunks = split_audio(media_path, task_dir, settings.asr_chunk_seconds)
             segments = []
             text_parts = []
             for index, chunk in enumerate(chunks):
-                start_s = index * settings.asr_chunk_seconds
-                end_s = min(duration, (index + 1) * settings.asr_chunk_seconds)
+                start_s = 0 if client.config["asr_provider"] == "assemblyai" else index * settings.asr_chunk_seconds
+                end_s = duration if client.config["asr_provider"] == "assemblyai" else min(duration, (index + 1) * settings.asr_chunk_seconds)
                 pct = 18 + int((index / len(chunks)) * 76)
                 _update(db, task, status="transcribing", progress=pct, message=f"正在听写第 {index + 1}/{len(chunks)} 段")
                 result = client.transcribe(chunk)
@@ -104,11 +111,14 @@ def transcribe_task(task_id: str):
                             item_start = min(duration, start_s + max(0.0, item["start_seconds"]))
                             item_end = min(duration, start_s + max(item["start_seconds"], item["end_seconds"]))
                             if item_end > item_start:
-                                segments.append({
+                                segment = {
                                     "start": _clock(item_start), "end": _clock(item_end),
                                     "start_seconds": item_start, "end_seconds": item_end,
                                     "text": item["text"],
-                                })
+                                }
+                                if item.get("speaker"):
+                                    segment["speaker"] = item["speaker"]
+                                segments.append(segment)
                     else:
                         segments.append({"start": _clock(start_s), "end": _clock(end_s), "start_seconds": start_s, "end_seconds": end_s, "text": text})
                     text_parts.append(text)

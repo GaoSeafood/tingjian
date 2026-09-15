@@ -193,6 +193,22 @@ def split_audio(media_path: Path, task_dir: Path, chunk_seconds: int) -> list[Pa
     return chunks
 
 
+def extract_audio(media_path: Path, task_dir: Path) -> Path:
+    """Create one normalized audio file for full-file ASR providers."""
+    audio_dir = task_dir / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    output = audio_dir / "full.mp3"
+    if output.exists() and output.stat().st_size > 0:
+        return output
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(media_path), "-vn", "-ac", "1", "-ar", "16000",
+        "-b:a", "48k", str(output),
+    ], capture_output=True, timeout=7200, check=True)
+    if not output.exists() or output.stat().st_size == 0:
+        raise RuntimeError("未能从媒体中提取音频")
+    return output
+
+
 def delete_source(path: str | None) -> None:
     if path:
         try:

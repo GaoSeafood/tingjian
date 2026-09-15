@@ -56,7 +56,10 @@ def _json(text: str):
 
 
 def find_highlights(title: str, segments: list[dict], visual_analysis: list[dict] | None = None) -> list[dict]:
-    transcript = "\n".join(f"[{s['start']}] {s['text']}" for s in segments)
+    transcript = "\n".join(
+        f"[{s['start']}] [{s['speaker']}] {s['text']}" if s.get("speaker") else f"[{s['start']}] {s['text']}"
+        for s in segments
+    )
     style_context = next((item for item in (visual_analysis or []) if item.get("kind") == "style_analysis"), None)
     visual_context = "\n".join(
         f"[{item.get('timestamp', '')}] 画面：{item.get('description', '')}；视觉吸引力：{item.get('visual_hook', '')}"

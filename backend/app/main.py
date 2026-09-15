@@ -49,6 +49,9 @@ class ProviderSettingsBody(BaseModel):
     custom_asr_base_url: str | None = None
     custom_asr_api_key: str | None = None
     custom_asr_model: str | None = None
+    assemblyai_base_url: str | None = None
+    assemblyai_api_key: str | None = None
+    assemblyai_model: str | None = None
     sub2api_base_url: str | None = None
     sub2api_api_key: str | None = None
     sub2api_fallback_api_key: str | None = None
@@ -406,7 +409,8 @@ def export(task_id: str, kind: str, user: User = Depends(current_user), db: Sess
     if kind == "srt":
         blocks = []
         for index, item in enumerate(task.segments or [], 1):
-            blocks.append(f"{index}\n{_srt(item['start_seconds'])} --> {_srt(item['end_seconds'])}\n{item['text']}\n")
+            speaker = f"[{item['speaker']}] " if item.get("speaker") else ""
+            blocks.append(f"{index}\n{_srt(item['start_seconds'])} --> {_srt(item['end_seconds'])}\n{speaker}{item['text']}\n")
         return PlainTextResponse("\n".join(blocks), headers={"Content-Disposition": f'attachment; filename="{task.id[:8]}.srt"'})
     raise HTTPException(404, "不支持的导出格式")
 
