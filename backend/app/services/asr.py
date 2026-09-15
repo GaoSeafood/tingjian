@@ -44,6 +44,8 @@ class ASRClient:
                 "audio_url": audio_url,
                 "speech_models": [self.config.get("assemblyai_model") or "universal-2"],
                 "speaker_labels": True,
+                "punctuate": True,
+                "format_text": True,
             }
             language = self.config.get("asr_language")
             if language and language != "auto":
