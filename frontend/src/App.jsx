@@ -106,7 +106,14 @@ function Home({ tasks, refresh, onOpen }) {
       onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       onDrop={e => { e.preventDefault(); setDrag(false); choose(e.dataTransfer.files[0]) }}>
       <Link2 size={24} className="unified-input-icon" />
-      <input value={file ? file.name : input} onChange={e => { setInput(e.target.value); setFile(null) }} placeholder="粘贴视频链接或整段分享文案…" aria-label="视频链接或分享文案" />
+      <input value={file ? file.name : input} onChange={e => { setInput(e.target.value); setFile(null) }} onKeyDown={event => {
+        // Let the IME finish composing Chinese text first; a confirmed Enter
+        // then follows the same path as clicking “开始听写”.
+        if (event.key === 'Enter' && !event.isComposing) {
+          event.preventDefault()
+          if (!busy && (file || input.trim())) submit()
+        }
+      }} placeholder="粘贴视频链接或整段分享文案…" aria-label="视频链接或分享文案" />
       <input ref={inputRef} type="file" accept="video/*,audio/*" hidden onChange={e => choose(e.target.files[0])}/>
       <button type="button" className="upload-button" onClick={() => inputRef.current?.click()}><Upload size={18}/>上传</button>
       {file && <span className="file-pill">{file.type.startsWith('audio/') ? <AudioLines size={16}/> : <Video size={16}/>} {fileSize(file.size)}</span>}
