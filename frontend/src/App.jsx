@@ -381,7 +381,7 @@ function SettingsPage({ onBack, user }) {
             <label>MiMo API Key<input type="password" value={form.mimo_api_key || ''} onChange={e => set('mimo_api_key', e.target.value)} placeholder={form.mimo_api_key_configured ? '已配置，留空保持不变' : '请输入 API Key'}/></label>
           </> : form.asr_provider === 'tencent' ? <>
             <label>腾讯云 AppID<input value={form.tencent_app_id || ''} onChange={e => set('tencent_app_id', e.target.value)} placeholder="例如 1250000000"/></label>
-            <label>引擎<select value={form.tencent_engine_type || '16k_zh'} onChange={e => set('tencent_engine_type', e.target.value)}><option value="16k_zh">16k_zh 中文普通话</option><option value="16k_zh_en">16k_zh_en 中英混合</option></select></label>
+            <label>引擎<select value={form.tencent_engine_type || '16k_zh'} onChange={e => set('tencent_engine_type', e.target.value)}><option value="16k_zh">16k_zh 中文普通话（支持说话人分离）</option></select></label>
             <label>腾讯云 SecretID<input type="password" value={form.tencent_secret_id || ''} onChange={e => set('tencent_secret_id', e.target.value)} placeholder={form.tencent_secret_id_configured ? '已配置，留空保持不变' : '请输入 SecretID'}/></label>
             <label>腾讯云 SecretKey<input type="password" value={form.tencent_secret_key || ''} onChange={e => set('tencent_secret_key', e.target.value)} placeholder={form.tencent_secret_key_configured ? '已配置，留空保持不变' : '请输入 SecretKey'}/></label>
             <p className="settings-note wide">已开启说话人分离。腾讯云极速接口支持 2 小时以内音频整段识别；更长音频会自动分段。</p>
