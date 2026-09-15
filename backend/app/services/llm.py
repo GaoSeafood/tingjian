@@ -57,10 +57,19 @@ def _json(text: str):
 
 def find_highlights(title: str, segments: list[dict], visual_analysis: list[dict] | None = None) -> list[dict]:
     transcript = "\n".join(f"[{s['start']}] {s['text']}" for s in segments)
+    style_context = next((item for item in (visual_analysis or []) if item.get("kind") == "style_analysis"), None)
     visual_context = "\n".join(
         f"[{item.get('timestamp', '')}] 画面：{item.get('description', '')}；视觉吸引力：{item.get('visual_hook', '')}"
         for item in (visual_analysis or [])
+        if item.get("kind") != "style_analysis"
     )
+    if style_context:
+        style_context_text = "；".join(
+            f"{key}：{style_context.get(key, '')}" for key in (
+                "overall_style", "color_lighting", "composition_camera", "editing_rhythm", "text_graphics", "replication_tips"
+            ) if style_context.get(key)
+        )
+        visual_context = f"整体画面风格：{style_context_text}\n" + visual_context
     visual_instruction = f"\n\n画面分析（可用于判断视觉亮点）：\n{visual_context}" if visual_context else ""
     messages = [
         {"role": "system", "content": "你是短视频内容编辑。只能使用给定时间码，不得编造原话。只输出合法 JSON。"},

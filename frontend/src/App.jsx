@@ -158,8 +158,13 @@ function HighlightResults({ items, onSeek }) {
 }
 
 function VisualResults({ items, onSeek }) {
-  return <div className="visual-results"><div className="result-heading"><Film size={18}/><b>画面分析</b><small>{items.length} 个关键画面</small></div>
-    {items.map((item, index) => <article className="visual-item" key={index}>
+  const style = items.find(item => item.kind === 'style_analysis')
+  const scenes = items.filter(item => item.kind !== 'style_analysis')
+  return <div className="visual-results"><div className="result-heading"><Film size={18}/><b>画面分析</b><small>{scenes.length} 个关键画面</small></div>
+    {style && <article className="visual-style-card"><div className="visual-style-title"><Sparkles size={17}/><b>整体画面风格</b></div><div className="visual-style-grid">
+      {[["整体调性", style.overall_style], ["色彩与光线", style.color_lighting], ["构图与镜头", style.composition_camera], ["剪辑节奏", style.editing_rhythm], ["字幕与包装", style.text_graphics]].filter(([, value]) => value).map(([label, value]) => <div key={label}><small>{label}</small><p>{value}</p></div>)}
+    </div>{style.replication_tips && <div className="visual-replication-tips"><b>复刻建议</b><p>{style.replication_tips}</p></div>}</article>}
+    {scenes.map((item, index) => <article className="visual-item" key={index}>
       <div><button className="time-link" onClick={() => onSeek?.(item.timestamp)}>{item.timestamp || `画面 ${index + 1}`}</button><span>{item.suggested_use || '视觉信息'}</span></div>
       <p>{item.description || '未提供画面描述'}</p>
       {item.onscreen_text && <small>画面文字：{item.onscreen_text}</small>}
@@ -290,7 +295,7 @@ function Detail({ taskId, onBack }) {
         <div className="next-pane-heading"><h2>AI 工作区</h2><p>选择一个功能，结果只在当前面板展开。</p></div>
         <div className="action-grid">
           <article className={`action-row ${activeTool === 'highlights' ? 'selected' : ''}`}><span className="action-icon coral"><WandSparkles/></span><div><h3>找亮点</h3><p>提取时间点、原话、推荐理由和标题</p></div><button className="primary compact" disabled={running} onClick={task.highlights?.length ? showHighlights : startHighlights}>{task.ai_status === 'highlighting' ? '分析中…' : task.highlights?.length ? `查看 ${task.highlights.length} 个` : '开始分析'}</button></article>
-          <article className={`action-row visual-action ${activeTool === 'visual' ? 'selected' : ''}`}><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>识别关键帧、画面文字、场景和视觉吸引力</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={task.visual_analysis?.length ? showVisualAnalysis : startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_analysis?.length ? `查看 ${task.visual_analysis.length} 个` : task.visual_status === 'completed' ? '暂无结果' : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
+          <article className={`action-row visual-action ${activeTool === 'visual' ? 'selected' : ''}`}><span className="action-icon"><Film/></span><div><h3>分析画面</h3><p>关键帧、视觉风格、字幕包装和复刻建议</p></div><button className="outline compact" disabled={running || task.media_kind === 'audio' || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={task.visual_analysis?.length ? showVisualAnalysis : startVisualAnalysis}>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.media_kind === 'audio' ? '仅视频支持' : task.visual_analysis?.length ? `查看 ${task.visual_analysis.filter(item => item.kind !== 'style_analysis').length} 个` : task.visual_status === 'completed' ? '暂无结果' : task.source_available ? '开始分析' : '原视频已删除'}</button></article>
           <article className={`action-row rewrite ${activeTool === 'rewrite' ? 'selected' : ''}`}><span className="action-icon"><PencilLine/></span><div><h3>复刻改编 <small className="expert-badge">文爆爆</small></h3><p>文爆爆会保留有效结构与节奏，生成新的口播文案</p></div><button className="outline compact coral-text" disabled={running} onClick={() => { setActiveTool('rewrite'); setAction('rewrite'); setMobilePane('ai') }}>{task.rewrite_text ? '查看改编' : '开始改编'}</button></article>
         </div>
         {action === 'rewrite' && <div className="rewrite-form"><label><span>改编方向</span><small>可以反复调整，不满意就再生成一版</small><textarea value={direction} onChange={e => setDirection(e.target.value)} placeholder="例如：改成面向新手的 60 秒口播，语气自然、有反差感"/></label><button className="primary compact" disabled={running} onClick={startRewrite}>生成新文案</button></div>}
