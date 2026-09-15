@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import mimetypes
 import re
+import socket
 import time
 from pathlib import Path
 from urllib.parse import urlencode
@@ -57,17 +58,19 @@ class ASRClient:
             hmac.new(secret_key.encode(), sign_text.encode(), hashlib.sha1).digest()
         ).decode()
         url = f"https://{host}{path}?{query}"
+        request_headers = {
+            "Authorization": signature,
+            "Content-Type": "application/octet-stream",
+        }
         try:
             with audio_path.open("rb") as handle:
-                response = requests.post(
-                    url,
-                    headers={
-                        "Authorization": signature,
-                        "Content-Type": "application/octet-stream",
-                    },
-                    data=handle,
-                    timeout=60 * 60,
-                )
+                response = requests.post(url, headers=request_headers, data=handle, timeout=60 * 60)
+            # Some mainland cloud DNS resolvers return a Tencent edge address
+            # that serves a generic nginx 404 for this legacy-compatible path.
+            # Retry through Tencent's canonical CNAME while keeping the ASR
+            # hostname for TLS and request signing.
+            if response.status_code == 404 and "nginx" in response.text.lower():
+                response = self._tencent_retry_via_cname(url, request_headers, audio_path)
         except requests.RequestException as exc:
             raise RuntimeError(f"腾讯云 ASR 网络请求失败：{exc}") from exc
         if response.status_code != 200:
@@ -79,6 +82,24 @@ class ASRClient:
         if payload.get("code", 0) not in (0, "0", None):
             raise RuntimeError(f"腾讯云 ASR 失败（{payload.get('code')}）：{payload.get('message') or '未知错误'}")
         return self._tencent_result(payload)
+
+    @staticmethod
+    def _tencent_retry_via_cname(url: str, headers: dict, audio_path: Path):
+        canonical_host = "asr.cloud.tencent.com"
+        fallback_host = "lb-r85bp1rc-y1msrhzfku902wn6.clb.ap-guangzhou.tencentclb.com"
+        original_getaddrinfo = socket.getaddrinfo
+
+        def resolve(host, port, *args, **kwargs):
+            if host == canonical_host:
+                return original_getaddrinfo(fallback_host, port, *args, **kwargs)
+            return original_getaddrinfo(host, port, *args, **kwargs)
+
+        socket.getaddrinfo = resolve
+        try:
+            with audio_path.open("rb") as handle:
+                return requests.post(url, headers=headers, data=handle, timeout=60 * 60)
+        finally:
+            socket.getaddrinfo = original_getaddrinfo
 
     @staticmethod
     def _tencent_result(payload: dict) -> dict:
