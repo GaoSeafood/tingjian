@@ -411,13 +411,33 @@ function App() {
   const [page, setPage] = useState('home')
   const [tasks, setTasks] = useState([])
   const [selected, setSelected] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState('')
+  const importUrlRef = useRef(new URLSearchParams(window.location.search).get('import_url')?.trim() || '')
   const refresh = useCallback(async () => { const items = await api.tasks(); setTasks(items); return items }, [])
   const removeTask = useCallback(async (taskId) => {
     await api.deleteTask(taskId)
     setTasks(current => current.filter(task => task.id !== taskId))
     if (selected === taskId) { setSelected(null); setPage('history') }
   }, [selected])
+  const importPendingUrl = useCallback(async () => {
+    const importUrl = importUrlRef.current
+    if (!importUrl || !user) return
+    setImporting(true); setImportError('')
+    try {
+      const task = await api.url(importUrl)
+      await refresh()
+      setSelected(task.id); setPage('detail')
+      const cleanUrl = new URL(window.location.href)
+      cleanUrl.searchParams.delete('import_url'); cleanUrl.searchParams.delete('material_id')
+      window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`)
+      importUrlRef.current = ''
+    } catch (err) {
+      setImportError(`日报视频导入失败：${err.message}`)
+    } finally { setImporting(false) }
+  }, [refresh, user])
   useEffect(() => { api.me().then(async me => { setUser(me); await refresh() }).catch(() => setUser(null)) }, [refresh])
+  useEffect(() => { if (user) importPendingUrl() }, [user, importPendingUrl])
   useEffect(() => {
     if (!user || !tasks.some(t => !['completed','failed'].includes(t.status))) return
     const timer = setInterval(() => refresh().catch(console.error), 2200); return () => clearInterval(timer)
@@ -432,6 +452,8 @@ function App() {
     {page === 'detail' && selected && (
       <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} />
     )}
+    {importing && <div className="notice"><LoaderCircle className="spin" size={16}/>正在导入日报视频…</div>}
+    {importError && <div className="notice import-error">{importError}</div>}
     <footer className="statusbar"><span><span className="footer-wave"><i/><i/><i/></span><i className="online"/>ASR 服务在线</span><span><LockKeyhole size={15}/>仅你可访问</span></footer>
   </div>
 }
