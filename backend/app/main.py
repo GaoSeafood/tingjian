@@ -341,7 +341,10 @@ def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: 
         raise HTTPException(409, "画面分析仅支持视频文件")
     if not task.media_path or not Path(task.media_path).exists():
         raise HTTPException(409, "原视频已删除，无法分析画面")
-    if task.visual_status not in {"idle", "failed"}:
+    # A completed analysis can be explicitly rerun when the analysis schema
+    # evolves (for example, to add the style profile). Switching tabs never
+    # calls this endpoint; the UI only uses it for an explicit rerun button.
+    if task.visual_status not in {"idle", "failed", "completed"}:
         raise HTTPException(409, "已有画面分析任务正在进行")
     task.visual_status, task.visual_message = "queued", "画面分析已排队"
     db.commit()
