@@ -127,10 +127,10 @@ function Home({ tasks, refresh, onOpen }) {
   </main>
 }
 
-function TranscriptEditor({ segments, showTimes, onChange }) {
+function TranscriptEditor({ segments, showTimes, showSpeakers, onChange }) {
   const areaRef = useRef(null)
   const value = segments.map(segment => {
-    const speaker = segment.speaker ? `[${segment.speaker}] ` : ''
+    const speaker = showSpeakers && segment.speaker ? `[${segment.speaker}] ` : ''
     return `${showTimes ? `[${segment.start}] ` : ''}${speaker}${segment.text}`
   }).join('\n')
   useEffect(() => {
@@ -229,6 +229,7 @@ function Detail({ taskId, onBack }) {
   const [segments, setSegments] = useState([])
   const [search, setSearch] = useState('')
   const [showTimes, setShowTimes] = useState(true)
+  const [showSpeakers, setShowSpeakers] = useState(true)
   const [dirty, setDirty] = useState(false)
   const [direction, setDirection] = useState('')
   const [action, setAction] = useState(null)
@@ -297,14 +298,14 @@ function Detail({ taskId, onBack }) {
     <div className="workspace">
       <section className={`transcript-pane ${showTimes ? '' : 'hide-times'} ${mobilePane === 'ai' ? 'mobile-hidden' : ''}`}>
         <div className="media-sticky">{task.source_available ? task.media_kind === 'audio' ? <audio ref={mediaRef} className="media-player audio-player" controls src={`/api/tasks/${task.id}/media`} /> : <video ref={mediaRef} className="media-player" controls src={`/api/tasks/${task.id}/media`} /> : <div className="media-missing">原媒体已按策略删除，听写稿仍会保留。</div>}</div>
-        <div className="pane-title"><h2>听写原文</h2><label className="switch-label">显示时间码<input type="checkbox" checked={showTimes} onChange={e => setShowTimes(e.target.checked)}/><i/></label></div>
+        <div className="pane-title"><h2>听写原文</h2><div className="transcript-switches"><label className="switch-label">显示时间码<input type="checkbox" checked={showTimes} onChange={e => setShowTimes(e.target.checked)}/><i/></label><label className="switch-label">显示说话人<input type="checkbox" checked={showSpeakers} onChange={e => setShowSpeakers(e.target.checked)}/><i/></label></div></div>
         <div className="transcript-tools"><label><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文案" /></label>
           <button className="outline compact" onClick={() => navigator.clipboard.writeText(segments.map(x => x.text).join('\n'))}><Copy size={17}/>复制全文</button>
           <a className="outline compact" href={`/api/tasks/${task.id}/export/txt`}><Download size={17}/>TXT</a>
           <a className="outline compact" href={`/api/tasks/${task.id}/export/srt`}><Download size={17}/>SRT</a>
           {dirty && <button className="primary compact" onClick={save}>保存修改</button>}
         </div>
-        <TranscriptEditor segments={visible} showTimes={showTimes} onChange={updateVisible}/>
+        <TranscriptEditor segments={visible} showTimes={showTimes} showSpeakers={showSpeakers} onChange={updateVisible}/>
       </section>
       <aside className={`next-pane ${mobilePane === 'source' ? 'mobile-hidden' : ''}`}>
         <div className="next-pane-heading"><h2>AI 工作区</h2><p>选择一个功能，结果只在当前面板展开。</p></div>
