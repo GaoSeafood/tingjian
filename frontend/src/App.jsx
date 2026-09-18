@@ -89,14 +89,20 @@ function Home({ tasks, refresh, onOpen }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const inputRef = useRef(null)
-  const submit = async () => {
+  const submit = async (nextFile = file, nextInput = input) => {
     setBusy(true); setError('')
     try {
-      const task = file ? await api.upload(file) : await api.url(input)
+      const task = nextFile ? await api.upload(nextFile) : await api.url(nextInput)
       await refresh(); onOpen(task.id)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
-  const choose = (selected) => { if (selected) { setFile(selected); setError('') } }
+  const choose = (selected) => {
+    if (!selected || busy) return
+    setFile(selected); setInput(''); setError('')
+    // Selecting or dropping a file is the upload confirmation. Start the
+    // transcription request immediately instead of requiring a second click.
+    submit(selected, '')
+  }
   return <main className="home shell">
     <section className="hero-copy">
       <h1>把视频，变成可编辑的文字</h1>
@@ -114,11 +120,11 @@ function Home({ tasks, refresh, onOpen }) {
           if (!busy && (file || input.trim())) submit()
         }
       }} placeholder="粘贴视频链接或整段分享文案…" aria-label="视频链接或分享文案" />
-      <input ref={inputRef} type="file" accept="video/*,audio/*" hidden onChange={e => choose(e.target.files[0])}/>
-      <button type="button" className="upload-button" onClick={() => inputRef.current?.click()}><Upload size={18}/>上传</button>
+      <input ref={inputRef} type="file" accept="video/*,audio/*" hidden disabled={busy} onChange={e => { choose(e.target.files[0]); e.target.value = '' }}/>
+      <button type="button" className="upload-button" disabled={busy} onClick={() => inputRef.current?.click()}><Upload size={18}/>上传</button>
       {file && <span className="file-pill">{file.type.startsWith('audio/') ? <AudioLines size={16}/> : <Video size={16}/>} {fileSize(file.size)}</span>}
     </div>
-    <p className="unified-hint">支持 MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB；也支持直接拖入文件</p>
+    <p className="unified-hint">支持 MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB；选择或拖入文件后会自动上传并开始听写</p>
     <div className="submit-row"><button className="primary" disabled={busy || (!file && !input.trim())} onClick={submit}>
       {busy ? <LoaderCircle className="spin" size={20}/> : <span className="mini-wave"><i/><i/><i/></span>}开始听写
     </button><span>{busy ? '正在上传并创建任务…' : '只进行语音听写，不会自动调用 AI；长视频会自动切换为音频模式。'}</span></div>
