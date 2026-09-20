@@ -103,13 +103,18 @@ def _ensure_schema():
 
 
 def task_dict(task: Task, detail: bool = False):
+    playback_url = task.source_playback_url
+    if not playback_url and task.source_type == "url" and task.source_url and is_direct_media_url(task.source_url):
+        # Backfill direct-link playback for tasks created before this column
+        # was introduced.
+        playback_url = task.source_url
     data = {
         "id": task.id, "title": task.title, "source_type": task.source_type,
         "duration": task.duration, "language": task.language, "status": task.status,
         "progress": task.progress, "message": task.message, "error": task.error,
         "asr_provider": task.asr_provider, "ai_status": task.ai_status,
-        "ai_message": task.ai_message, "source_available": bool(task.media_path or task.source_playback_url),
-        "playback_url": task.source_playback_url if task.source_type == "url" else None,
+        "ai_message": task.ai_message, "source_available": bool(task.media_path or playback_url),
+        "playback_url": playback_url if task.source_type == "url" else None,
         "visual_status": task.visual_status, "visual_message": task.visual_message,
         "media_kind": media_kind(task.media_path),
         "source_delete_at": task.source_delete_at.isoformat() if task.source_delete_at else None,
@@ -414,8 +419,11 @@ def delete_task(task_id: str, user: User = Depends(current_user), db: Session = 
 @app.get("/api/tasks/{task_id}/media")
 def media(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     task = owned_task(task_id, user, db)
-    if task.source_playback_url:
-        return RedirectResponse(task.source_playback_url, status_code=307)
+    playback_url = task.source_playback_url
+    if not playback_url and task.source_type == "url" and task.source_url and is_direct_media_url(task.source_url):
+        playback_url = task.source_url
+    if playback_url:
+        return RedirectResponse(playback_url, status_code=307)
     if not task.media_path or not Path(task.media_path).exists():
         raise HTTPException(404, "原视频已删除")
     source = Path(task.media_path)
