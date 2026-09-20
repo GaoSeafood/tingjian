@@ -217,16 +217,16 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | Non
     title = info.get("title") or "网络视频"
     requested = info.get("requested_downloads") or []
     candidate = requested[0].get("filepath") if requested else None
-    if candidate and Path(candidate).exists():
-        return Path(candidate), title, audio_only
-    matches = sorted(task_dir.glob("source.*"))
-    if not matches:
-        raise RuntimeError("视频下载完成后未找到文件")
     playback_url = info.get("url") if isinstance(info, dict) else None
     if not playback_url:
         requested_formats = info.get("requested_formats") if isinstance(info, dict) else None
         if requested_formats:
             playback_url = requested_formats[0].get("url")
+    if candidate and Path(candidate).exists():
+        return Path(candidate), title, audio_only, playback_url
+    matches = sorted(task_dir.glob("source.*"))
+    if not matches:
+        raise RuntimeError("视频下载完成后未找到文件")
     return matches[0], title, audio_only, playback_url
 
 
