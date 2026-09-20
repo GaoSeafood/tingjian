@@ -60,18 +60,39 @@ function StatusMark({ task }) {
 }
 
 function TaskTable({ tasks, onOpen, onDelete, full = false }) {
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const taskIds = tasks.map(task => task.id)
+  const allSelected = full && taskIds.length > 0 && taskIds.every(id => selectedIds.has(id))
+  useEffect(() => {
+    setSelectedIds(current => new Set([...current].filter(id => taskIds.includes(id))))
+  }, [tasks])
   const remove = async (event, task) => {
     event.stopPropagation()
     if (!window.confirm(`确定删除“${task.title}”这条历史记录吗？听写稿、亮点和改写结果都会删除。`)) return
-    try { await onDelete(task.id) } catch (err) { window.alert(err.message) }
+    try { await onDelete(task.id); setSelectedIds(current => { const next = new Set(current); next.delete(task.id); return next }) } catch (err) { window.alert(err.message) }
+  }
+  const toggleOne = (event, id) => {
+    event.stopPropagation()
+    setSelectedIds(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })
+  }
+  const toggleAll = event => {
+    event.stopPropagation()
+    setSelectedIds(allSelected ? new Set() : new Set(taskIds))
+  }
+  const removeSelected = async () => {
+    const ids = [...selectedIds].filter(id => taskIds.includes(id))
+    if (!ids.length || !window.confirm(`确定删除选中的 ${ids.length} 条历史记录吗？听写稿、亮点和改写结果都会删除。`)) return
+    try { await Promise.all(ids.map(id => onDelete(id))); setSelectedIds(new Set()) }
+    catch (err) { window.alert(err.message) }
   }
   return <section className={`recent ${full ? 'history-list' : ''}`}>
-    <div className="section-title"><h2>{full ? '全部听写记录' : '最近听写'}</h2>{full && <span>{tasks.length} 条记录</span>}</div>
-    <div className="task-table">
-      <div className="task-head"><span>标题</span><span>来源</span><span>时长</span><span>状态</span><span>时间</span><span/></div>
+    <div className="section-title"><h2>{full ? '全部听写记录' : '最近听写'}</h2>{full && <div className="history-actions"><span>{tasks.length} 条记录</span>{selectedIds.size > 0 && <button className="outline compact bulk-delete" onClick={removeSelected}><Trash2 size={15}/>删除选中 ({selectedIds.size})</button>}</div>}</div>
+    <div className={`task-table ${full ? 'selectable' : ''}`}>
+      <div className="task-head">{full && <label className="task-select-cell" onClick={event => event.stopPropagation()}><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="全选历史记录"/></label>}<span>标题</span><span>来源</span><span>时长</span><span>状态</span><span>时间</span><span/></div>
       {tasks.length === 0 && <div className="empty">还没有听写记录，先上传一个视频吧。</div>}
       {tasks.map(task => <div className="task-row" role="button" tabIndex="0" key={task.id}
         onClick={() => onOpen(task.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(task.id) }}>
+        {full && <span className="task-select-cell" onClick={event => event.stopPropagation()}><input type="checkbox" checked={selectedIds.has(task.id)} onChange={event => toggleOne(event, task.id)} aria-label={`选择${task.title}`}/></span>}
         <span className="task-name">{task.media_kind === 'audio' ? <AudioLines size={22}/> : <Video size={22}/>}<b>{task.title}</b><small>{sourceDate(task.created_at)}</small></span>
         <span>{task.source_platform || (task.source_type === 'url' ? '视频链接' : '本地文件')}</span>
         <span>{clock(task.duration)}</span><StatusMark task={task}/>
@@ -327,7 +348,7 @@ function Detail({ taskId, onBack }) {
           {activeTool === 'highlights' && (task.highlights?.length > 0 ? <HighlightResults items={task.highlights} onSeek={seekTo}/> : <div className="result-empty">点击上方“找亮点”，从听写稿中提取值得保留的片段。</div>)}
           {activeTool === 'visual' && (task.visual_analysis?.length > 0 ? <VisualResults items={task.visual_analysis} onSeek={seekTo}/> : <div className="result-empty">点击上方“分析画面”，识别视频中的关键视觉信息。</div>)}
           {activeTool === 'rewrite' && (task.rewrite_text ? <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>改编结果</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => navigator.clipboard.writeText(task.rewrite_text)}><Copy size={16}/>复制</button></div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea value={task.rewrite_text} onChange={event => setTask(current => ({...current, rewrite_text: event.target.value}))} spellCheck="false" /> : <MarkdownPreview value={task.rewrite_text}/>}</div></div> : <div className="result-empty">点击上方“复刻改编”，让文爆爆生成新的口播文案。</div>)}
-          <div className="retention"><span>原视频将在 24 小时后自动删除</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除</button>}</div>
+          <div className="retention"><span>{task.playback_url ? '网络视频优先使用原始直链播放，本地处理缓存会自动清理' : '原视频将在 24 小时后自动删除'}</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除</button>}</div>
         </div>
         {notice && <div className="notice">{notice}</div>}
       </aside>

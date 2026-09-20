@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 import shutil
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from .config import settings
 from .database import SessionLocal
@@ -64,8 +64,8 @@ def transcribe_task(task_id: str):
             audio_only = False
             if task.source_type == "url":
                 _update(db, task, status="downloading", progress=8, message="正在下载视频")
-                media_path, title, audio_only = download_video(task.source_url or "", task_dir)
-                task.media_path, task.title = str(media_path), title
+                media_path, title, audio_only, playback_url = download_video(task.source_url or "", task_dir)
+                task.media_path, task.title, task.source_playback_url = str(media_path), title, playback_url or task.source_playback_url
                 db.commit()
             else:
                 media_path = Path(task.media_path or "")
@@ -190,12 +190,23 @@ def rewrite_task(task_id: str, direction: str):
 
 def cleanup_expired_sources():
     with SessionLocal() as db:
-        tasks = db.scalars(select(Task).where(Task.source_delete_at <= utcnow(), Task.media_path.is_not(None))).all()
+        now = utcnow()
+        legacy_cutoff = now - timedelta(hours=settings.source_retention_hours)
+        expired = or_(
+            Task.source_delete_at <= now,
+            and_(
+                Task.source_delete_at.is_(None),
+                Task.status.in_(["completed", "failed"]),
+                Task.created_at <= legacy_cutoff,
+            ),
+        )
+        tasks = db.scalars(select(Task).where(expired, Task.media_path.is_not(None))).all()
         for task in tasks:
             from .services.media import delete_source
             delete_source(task.media_path)
             shutil.rmtree(settings.data_dir / "tasks" / task.id, ignore_errors=True)
             task.media_path = None
+            task.updated_at = now
         db.commit()
 
 

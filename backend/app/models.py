@@ -28,6 +28,7 @@ class Task(Base):
     title: Mapped[str] = mapped_column(String(300), default="未命名视频")
     source_type: Mapped[str] = mapped_column(String(20))
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_playback_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     media_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration: Mapped[float] = mapped_column(Float, default=0)
     language: Mapped[str] = mapped_column(String(20), default="auto")

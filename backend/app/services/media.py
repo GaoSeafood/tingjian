@@ -122,7 +122,7 @@ def _yt_dlp_options(url: str, **overrides) -> dict:
     return options
 
 
-def _is_direct_media_url(url: str) -> bool:
+def is_direct_media_url(url: str) -> bool:
     """Return True for a URL that points straight at a media file.
 
     CDN links (for example, ByteDance TOS signed .mp4 URLs) are not platform
@@ -133,7 +133,7 @@ def _is_direct_media_url(url: str) -> bool:
     return path.endswith(tuple(AUDIO_SUFFIXES | VIDEO_SUFFIXES))
 
 
-def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool]:
+def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool, str]:
     """Stream a direct media URL to disk with CDN-friendly retries."""
     parsed = urlparse(url)
     suffix = Path(parsed.path).suffix.lower()
@@ -174,7 +174,7 @@ def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool]:
                 raise RuntimeError("直链响应为空")
             final_path = Path(urlparse(response.url).path)
             title = final_path.stem or "网络视频"
-            return output, title, suffix in AUDIO_SUFFIXES
+            return output, title, suffix in AUDIO_SUFFIXES, url
         except (requests.RequestException, OSError, RuntimeError) as exc:
             last_error = exc
             output.unlink(missing_ok=True)
@@ -183,9 +183,9 @@ def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool]:
     raise RuntimeError(f"直链下载失败：{last_error}") from last_error
 
 
-def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool]:
+def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | None]:
     normalized_url = validate_public_url(url)
-    if _is_direct_media_url(normalized_url):
+    if is_direct_media_url(normalized_url):
         return _download_direct_media(normalized_url, task_dir)
     audio_only = False
     try:
@@ -222,7 +222,12 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool]:
     matches = sorted(task_dir.glob("source.*"))
     if not matches:
         raise RuntimeError("视频下载完成后未找到文件")
-    return matches[0], title, audio_only
+    playback_url = info.get("url") if isinstance(info, dict) else None
+    if not playback_url:
+        requested_formats = info.get("requested_formats") if isinstance(info, dict) else None
+        if requested_formats:
+            playback_url = requested_formats[0].get("url")
+    return matches[0], title, audio_only, playback_url
 
 
 def probe_duration(path: Path) -> float:

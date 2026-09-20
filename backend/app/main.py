@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import desc, inspect, select, text
@@ -16,10 +16,10 @@ from sqlalchemy.orm import Session
 from .auth import create_session, current_user, hash_password, seed_admin, verify_password
 from .config import settings
 from .database import Base, engine, get_db
-from .jobs import analyze_visual_task, highlight_task, rewrite_task, transcribe_task
+from .jobs import analyze_visual_task, cleanup_expired_sources, highlight_task, rewrite_task, transcribe_task
 from .models import Task, User
 from .provider_config import provider_config, public_provider_config, update_provider_config
-from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, delete_source, extract_video_url, media_kind, source_platform_label
+from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, delete_source, extract_video_url, is_direct_media_url, media_kind, source_platform_label
 from .worker import enqueue
 
 
@@ -78,6 +78,7 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
     _ensure_schema()
     seed_admin()
+    cleanup_expired_sources()
     yield
 
 
@@ -88,6 +89,7 @@ def _ensure_schema():
     """Add fields introduced after the initial deployment without losing data."""
     columns = {item["name"] for item in inspect(engine).get_columns("tasks")}
     additions = {
+        "source_playback_url": "TEXT",
         "visual_analysis": "JSON",
         "visual_status": "VARCHAR(30) DEFAULT 'idle'",
         "visual_message": "VARCHAR(300) DEFAULT ''",
@@ -106,7 +108,8 @@ def task_dict(task: Task, detail: bool = False):
         "duration": task.duration, "language": task.language, "status": task.status,
         "progress": task.progress, "message": task.message, "error": task.error,
         "asr_provider": task.asr_provider, "ai_status": task.ai_status,
-        "ai_message": task.ai_message, "source_available": bool(task.media_path),
+        "ai_message": task.ai_message, "source_available": bool(task.media_path or task.source_playback_url),
+        "playback_url": task.source_playback_url if task.source_type == "url" else None,
         "visual_status": task.visual_status, "visual_message": task.visual_message,
         "media_kind": media_kind(task.media_path),
         "source_delete_at": task.source_delete_at.isoformat() if task.source_delete_at else None,
@@ -257,6 +260,8 @@ async def upload_douyin_cookies(cookies: UploadFile = File(...), user: User = De
 
 @app.get("/api/tasks")
 def list_tasks(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    # Repair legacy tasks and missed delayed jobs whenever history is opened.
+    cleanup_expired_sources()
     items = db.scalars(select(Task).where(Task.user_id == user.id).order_by(desc(Task.created_at)).limit(50)).all()
     return [task_dict(item) for item in items]
 
@@ -311,7 +316,11 @@ def url_task(body: UrlBody, user: User = Depends(current_user), db: Session = De
         raise HTTPException(400, str(exc))
     task_id = str(uuid.uuid4())
     (settings.data_dir / "tasks" / task_id).mkdir(parents=True, exist_ok=False)
-    task = Task(id=task_id, user_id=user.id, title="网络视频", source_type="url", source_url=url, language="auto", asr_provider=provider_config()["asr_provider"])
+    task = Task(
+        id=task_id, user_id=user.id, title="网络视频", source_type="url", source_url=url,
+        source_playback_url=url if is_direct_media_url(url) else None,
+        language="auto", asr_provider=provider_config()["asr_provider"],
+    )
     db.add(task)
     db.commit()
     enqueue(transcribe_task, task.id)
@@ -383,6 +392,7 @@ def remove_source(task_id: str, user: User = Depends(current_user), db: Session 
     task = owned_task(task_id, user, db)
     delete_source(task.media_path)
     task.media_path = None
+    task.source_playback_url = None
     task.source_delete_at = None
     db.commit()
     return {"ok": True}
@@ -404,6 +414,8 @@ def delete_task(task_id: str, user: User = Depends(current_user), db: Session = 
 @app.get("/api/tasks/{task_id}/media")
 def media(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     task = owned_task(task_id, user, db)
+    if task.source_playback_url:
+        return RedirectResponse(task.source_playback_url, status_code=307)
     if not task.media_path or not Path(task.media_path).exists():
         raise HTTPException(404, "原视频已删除")
     source = Path(task.media_path)
