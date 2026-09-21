@@ -1,9 +1,30 @@
+function formatError(value) {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.map(item => {
+      if (typeof item === 'string') return item
+      if (!item || typeof item !== 'object') return String(item)
+      const message = item.msg || item.message || item.detail
+      const location = Array.isArray(item.loc) ? item.loc.filter(part => part !== 'body').join('.') : ''
+      return location && message ? `${location}: ${message}` : formatError(message || item)
+    }).filter(Boolean).join('；')
+  }
+  if (value && typeof value === 'object') {
+    if (value.detail !== undefined) return formatError(value.detail)
+    if (value.error !== undefined) return formatError(value.error)
+    if (value.message !== undefined) return formatError(value.message)
+    const fields = Object.entries(value).map(([key, item]) => `${key}: ${formatError(item)}`).filter(Boolean)
+    return fields.join('；')
+  }
+  return value == null ? '' : String(value)
+}
+
 async function request(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options })
   if (response.status === 401) throw new Error('UNAUTHORIZED')
   const type = response.headers.get('content-type') || ''
   const body = type.includes('json') ? await response.json() : await response.text()
-  if (!response.ok) throw new Error(body?.detail || body?.error || body || '请求失败')
+  if (!response.ok) throw new Error(formatError(body?.detail ?? body?.error ?? body) || '请求失败')
   return body
 }
 
