@@ -146,7 +146,7 @@ function Home({ tasks, refresh, onOpen }) {
       {file && <span className="file-pill">{file.type.startsWith('audio/') ? <AudioLines size={16}/> : <Video size={16}/>} {fileSize(file.size)}</span>}
     </div>
     <p className="unified-hint">支持 MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB；选择或拖入文件后会自动上传并开始听写</p>
-    <div className="submit-row"><button className="primary" disabled={busy || (!file && !input.trim())} onClick={submit}>
+    <div className="submit-row"><button className="primary" disabled={busy || (!file && !input.trim())} onClick={() => submit()}>
       {busy ? <LoaderCircle className="spin" size={20}/> : <span className="mini-wave"><i/><i/><i/></span>}开始听写
     </button><span>{busy ? '正在上传并创建任务…' : '只进行语音听写，不会自动调用 AI；长视频会自动切换为音频模式。'}</span></div>
     {error && <div className="error-line spacious">{error}</div>}
