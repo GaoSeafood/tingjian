@@ -417,12 +417,12 @@ def delete_task(task_id: str, user: User = Depends(current_user), db: Session = 
 
 
 @app.get("/api/tasks/{task_id}/media")
-def media(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def media(task_id: str, local: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)):
     task = owned_task(task_id, user, db)
     playback_url = task.source_playback_url
     if not playback_url and task.source_type == "url" and task.source_url and is_direct_media_url(task.source_url):
         playback_url = task.source_url
-    if playback_url:
+    if playback_url and not local:
         return RedirectResponse(playback_url, status_code=307)
     if not task.media_path or not Path(task.media_path).exists():
         raise HTTPException(404, "原视频已删除")

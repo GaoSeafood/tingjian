@@ -264,12 +264,14 @@ function Detail({ taskId, onBack }) {
   const [mobilePane, setMobilePane] = useState('source')
   const [activeTool, setActiveTool] = useState('highlights')
   const [notice, setNotice] = useState('')
+  const [mediaMode, setMediaMode] = useState('remote')
   const mediaRef = useRef(null)
   const load = useCallback(async () => {
     const next = await api.task(taskId); setTask(next)
     if (!dirty) setSegments(next.segments || [])
   }, [taskId, dirty])
   useEffect(() => { load().catch(console.error) }, [load])
+  useEffect(() => { setMediaMode('remote') }, [taskId])
   useEffect(() => {
     const visualRunning = task && !['idle', 'completed', 'failed'].includes(task.visual_status || 'idle')
     const aiRunning = task && !['idle', 'completed', 'failed'].includes(task.ai_status)
@@ -300,6 +302,10 @@ function Detail({ taskId, onBack }) {
     mediaRef.current.currentTime = seconds
     mediaRef.current.play().catch(() => {})
   }, [])
+  const mediaSrc = `/api/tasks/${taskId}/media${mediaMode === 'local' ? '?local=1' : ''}`
+  const handleMediaError = () => {
+    setMediaMode(current => current === 'remote' ? 'local' : 'failed')
+  }
   if (!task) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
   if (task.status !== 'completed') return <main className="processing shell"><button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button><div className="processing-center">
     {task.status === 'failed' ? <><span className="process-icon failed"><RotateCcw/></span><h1>听写失败</h1><p>{task.error}</p></> : <><span className="process-icon"><LoaderCircle className="spin"/></span><h1>{task.message}</h1><p>{task.title}</p><div className="big-progress"><i style={{width: `${task.progress}%`}}/></div><b>{task.progress}%</b></>}
@@ -324,7 +330,7 @@ function Detail({ taskId, onBack }) {
     <div className="mobile-pane-tabs" role="tablist" aria-label="详情视图"><button className={mobilePane === 'source' ? 'active' : ''} onClick={() => setMobilePane('source')}>原视频与听写</button><button className={mobilePane === 'ai' ? 'active' : ''} onClick={() => setMobilePane('ai')}>AI 工作区</button></div>
     <div className="workspace">
       <section className={`transcript-pane ${showTimes ? '' : 'hide-times'} ${mobilePane === 'ai' ? 'mobile-hidden' : ''}`}>
-        <div className="media-sticky">{task.source_available ? task.media_kind === 'audio' ? <audio ref={mediaRef} className="media-player audio-player" controls src={`/api/tasks/${task.id}/media`} /> : <video ref={mediaRef} className="media-player" controls src={`/api/tasks/${task.id}/media`} /> : <div className="media-missing">原媒体已按策略删除，听写稿仍会保留。</div>}</div>
+        <div className="media-sticky">{task.source_available && mediaMode !== 'failed' ? task.media_kind === 'audio' ? <audio key={mediaSrc} ref={mediaRef} className="media-player audio-player" controls src={mediaSrc} onError={handleMediaError} /> : <video key={mediaSrc} ref={mediaRef} className="media-player" controls src={mediaSrc} onError={handleMediaError} /> : <div className="media-missing">{task.source_available ? '视频直链已失效，服务器预览也不可用。' : '原媒体已按策略删除，听写稿仍会保留。'}</div>}</div>
         <div className="pane-title"><h2>听写原文</h2><div className="transcript-switches"><label className="switch-label">显示时间码<input type="checkbox" checked={showTimes} onChange={e => setShowTimes(e.target.checked)}/><i/></label><label className="switch-label">显示说话人<input type="checkbox" checked={showSpeakers} onChange={e => setShowSpeakers(e.target.checked)}/><i/></label></div></div>
         <div className="transcript-tools"><label><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文案" /></label>
           <button className="outline compact" onClick={() => navigator.clipboard.writeText(segments.map(x => x.text).join('\n'))}><Copy size={17}/>复制全文</button>
