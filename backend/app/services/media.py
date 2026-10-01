@@ -61,7 +61,7 @@ def validate_public_url(url: str) -> str:
             raise ValueError("不允许访问内网或本机地址")
     supported_host = any(host == suffix or host.endswith(f".{suffix}") for suffix in ALLOWED_HOST_SUFFIXES)
     direct_media_host = any(host == suffix or host.endswith(f".{suffix}") for suffix in DIRECT_MEDIA_HOST_SUFFIXES)
-    if not supported_host and not direct_media_host and not parsed.path.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
+    if not supported_host and not direct_media_host and not parsed.path.lower().endswith(tuple(VIDEO_SUFFIXES | AUDIO_SUFFIXES)):
         raise ValueError("暂不支持这个视频平台")
     return url.strip()
 
@@ -100,7 +100,7 @@ def _cookie_file_for_url(url: str) -> str | None:
     return None
 
 
-def _yt_dlp_options(url: str, **overrides) -> dict:
+def _yt_dlp_options(url: str, *, use_douyin_cookies: bool = True, **overrides) -> dict:
     options = {
         "noplaylist": True,
         "quiet": True,
@@ -115,7 +115,7 @@ def _yt_dlp_options(url: str, **overrides) -> dict:
             "Accept": "*/*",
         },
     }
-    cookie_file = _cookie_file_for_url(url)
+    cookie_file = _cookie_file_for_url(url) if use_douyin_cookies else None
     if cookie_file:
         options["cookiefile"] = cookie_file
     options.update(overrides)
@@ -133,7 +133,7 @@ def is_direct_media_url(url: str) -> bool:
     return path.endswith(tuple(AUDIO_SUFFIXES | VIDEO_SUFFIXES))
 
 
-def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool, str]:
+def _download_direct_media(url: str, task_dir: Path, progress_callback=None) -> tuple[Path, str, bool, str]:
     """Stream a direct media URL to disk with CDN-friendly retries."""
     parsed = urlparse(url)
     suffix = Path(parsed.path).suffix.lower()
@@ -162,6 +162,7 @@ def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool, s
                 if content_length > max_bytes:
                     raise RuntimeError(f"视频文件超过 {settings.max_upload_mb} MB 限制")
                 written = 0
+                last_progress = 0
                 with output.open("wb") as handle:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if not chunk:
@@ -170,6 +171,11 @@ def _download_direct_media(url: str, task_dir: Path) -> tuple[Path, str, bool, s
                         if written > max_bytes:
                             raise RuntimeError(f"视频文件超过 {settings.max_upload_mb} MB 限制")
                         handle.write(chunk)
+                        if progress_callback and content_length:
+                            progress = min(94, int(5 + written / content_length * 89))
+                            if progress >= last_progress + 5:
+                                last_progress = progress
+                                progress_callback(progress)
             if written <= 0:
                 raise RuntimeError("直链响应为空")
             final_path = Path(urlparse(response.url).path)
@@ -228,6 +234,59 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | Non
     if not matches:
         raise RuntimeError("视频下载完成后未找到文件")
     return matches[0], title, audio_only, playback_url
+
+
+def download_original_video(url: str, task_dir: Path, progress_callback=None, *, use_douyin_cookies: bool = False) -> tuple[Path, str]:
+    """Download a user-requested video artifact (never switch to audio-only)."""
+    normalized_url = validate_public_url(url)
+    if is_direct_media_url(normalized_url):
+        if Path(urlparse(normalized_url).path).suffix.lower() in AUDIO_SUFFIXES:
+            raise RuntimeError("这个链接是音频文件；下载视频请粘贴视频链接")
+        path, title, is_audio, _ = _download_direct_media(normalized_url, task_dir, progress_callback)
+        if is_audio:
+            raise RuntimeError("这个链接没有视频画面，无法作为视频下载")
+        if progress_callback:
+            progress_callback(96)
+        return path, title
+
+    def report_progress(status):
+        if not progress_callback or status.get("status") != "downloading":
+            return
+        total = status.get("total_bytes") or status.get("total_bytes_estimate")
+        downloaded = status.get("downloaded_bytes") or 0
+        if total:
+            progress_callback(min(94, max(5, int(5 + downloaded / total * 89))))
+
+    options = _yt_dlp_options(normalized_url, use_douyin_cookies=use_douyin_cookies, **{
+        "outtmpl": str(task_dir / "source.%(ext)s"),
+        "format": "bv*+ba/b",
+        "max_filesize": settings.max_upload_mb * 1024 * 1024,
+        "retries": 3,
+        "merge_output_format": "mp4",
+        "progress_hooks": [report_progress],
+    })
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(normalized_url, download=True)
+    except Exception as exc:
+        detail = str(exc)
+        if "Fresh cookies" in detail or "cookies" in detail.lower():
+            raise RuntimeError("抖音需要新鲜的登录 Cookie，请管理员在设置中更新抖音 Cookie 文件") from exc
+        raise
+
+    candidates = [
+        path for path in task_dir.glob("source.*")
+        if path.is_file() and not path.name.endswith((".part", ".ytdl"))
+        and path.suffix.lower() in VIDEO_SUFFIXES
+    ]
+    if not candidates:
+        raise RuntimeError("下载完成后没有找到可用的视频文件")
+    path = max(candidates, key=lambda item: item.stat().st_mtime)
+    if path.stat().st_size > settings.max_upload_mb * 1024 * 1024:
+        path.unlink(missing_ok=True)
+        raise RuntimeError(f"视频文件超过 {settings.max_upload_mb} MB 限制")
+    title = str((info or {}).get("title") or "网络视频")[:300]
+    return path, title
 
 
 def probe_duration(path: Path) -> float:

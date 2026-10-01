@@ -65,6 +65,9 @@ export const api = {
   url: (url) => request('/api/tasks/url', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
   }),
+  download: (url) => request('/api/tasks/download', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+  }),
   saveTranscript: (id, segments) => request(`/api/tasks/${id}/transcript`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segments }),
   }),

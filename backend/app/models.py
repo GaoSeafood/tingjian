@@ -26,6 +26,7 @@ class Task(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     title: Mapped[str] = mapped_column(String(300), default="未命名视频")
+    task_kind: Mapped[str] = mapped_column(String(20), default="transcription", server_default="transcription", nullable=False)
     source_type: Mapped[str] = mapped_column(String(20))
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_playback_url: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -28,7 +28,7 @@ def transcription_failure(job, connection, exc_type, exc_value, traceback):
             return
         deadline = utcnow() + timedelta(hours=settings.source_retention_hours)
         task.status = "failed"
-        task.message = "听写失败"
+        task.message = "下载失败" if task.task_kind == "download" else "听写失败"
         task.error = str(exc_value or exc_type or "后台任务异常")[:1000]
         task.source_delete_at = deadline
         task.updated_at = utcnow()
@@ -44,7 +44,7 @@ def transcription_failure(job, connection, exc_type, exc_value, traceback):
 
 def enqueue(func, *args):
     options = {"job_timeout": settings.job_timeout_seconds, "result_ttl": 86400, "failure_ttl": 604800}
-    if getattr(func, "__name__", "") == "transcribe_task":
+    if getattr(func, "__name__", "") in {"transcribe_task", "download_source_task"}:
         options["on_failure"] = transcription_failure
     target = ai_queue if getattr(func, "__name__", "") in {"highlight_task", "analyze_visual_task", "rewrite_task"} else queue
     return target.enqueue(func, *args, **options)

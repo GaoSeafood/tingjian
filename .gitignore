@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .DS_Store
 __pycache__/
 *.py[cod]
@@ -7,4 +9,5 @@ node_modules/
 frontend/dist/
 .playwright-cli/
 data/
+/output/
 *.log

@@ -7,10 +7,10 @@ from sqlalchemy import and_, or_, select
 
 from .config import settings
 from .database import SessionLocal
-from .models import Task, utcnow
+from .models import Task, User, utcnow
 from .services.asr import ASRClient
 from .services.llm import find_highlights, rewrite_script
-from .services.media import download_video, ensure_browser_preview, extract_audio, media_kind, probe_duration, split_audio
+from .services.media import download_original_video, download_video, ensure_browser_preview, extract_audio, media_kind, probe_duration, split_audio
 from .services.vision import analyze_visuals
 
 
@@ -143,6 +143,50 @@ def transcribe_task(task_id: str):
                 # The failed task remains visible for manual cleanup if the
                 # scheduler is temporarily unavailable.
                 pass
+
+
+def download_source_task(task_id: str):
+    """Download the original video as a separate user-visible artifact."""
+    with SessionLocal() as db:
+        task = db.get(Task, task_id)
+        if not task or task.task_kind != "download":
+            return
+        task_dir = settings.data_dir / "tasks" / task.id
+        last_reported = 0
+        try:
+            _update(db, task, status="preparing", progress=3, message="正在解析视频链接", error=None)
+            _update(db, task, status="downloading", progress=5, message="正在下载原视频")
+
+            def report_progress(value: int):
+                nonlocal last_reported
+                value = max(5, min(95, int(value)))
+                if value >= last_reported + 5:
+                    last_reported = value
+                    _update(db, task, status="downloading", progress=value, message=f"正在下载原视频 {value}%")
+
+            account = db.get(User, task.user_id)
+            media_path, title = download_original_video(
+                task.source_url or "", task_dir, report_progress,
+                use_douyin_cookies=bool(account and account.role == "admin"),
+            )
+            try:
+                duration = probe_duration(media_path)
+            except Exception:
+                duration = 0
+            deadline = utcnow() + timedelta(hours=settings.source_retention_hours)
+            _update(
+                db, task, status="completed", progress=100, message="视频已准备好下载",
+                title=title, duration=duration, media_path=str(media_path), source_delete_at=deadline,
+            )
+            _schedule_cleanup(task.id, timedelta(hours=settings.source_retention_hours))
+        except Exception as exc:
+            # A failed download has no user value; remove partial media now,
+            # while retaining the failure record in history for diagnosis.
+            shutil.rmtree(task_dir, ignore_errors=True)
+            _update(
+                db, task, status="failed", progress=0, message="下载失败",
+                error=str(exc), media_path=None, source_delete_at=None,
+            )
 
 
 def highlight_task(task_id: str):

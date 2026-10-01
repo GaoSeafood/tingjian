@@ -5,6 +5,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 from .auth import create_session, current_user, hash_password, seed_admin, verify_password
 from .config import settings
 from .database import Base, engine, get_db
-from .jobs import analyze_visual_task, cleanup_expired_sources, highlight_task, rewrite_task, transcribe_task
+from .jobs import analyze_visual_task, cleanup_expired_sources, download_source_task, highlight_task, rewrite_task, transcribe_task
 from .models import Task, User
 from .provider_config import provider_config, public_provider_config, update_provider_config
 from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, delete_source, extract_video_url, is_direct_media_url, media_kind, source_platform_label
@@ -90,6 +91,7 @@ def _ensure_schema():
     columns = {item["name"] for item in inspect(engine).get_columns("tasks")}
     additions = {
         "source_playback_url": "TEXT",
+        "task_kind": "VARCHAR(20) NOT NULL DEFAULT 'transcription'",
         "visual_analysis": "JSON",
         "visual_status": "VARCHAR(30) DEFAULT 'idle'",
         "visual_message": "VARCHAR(300) DEFAULT ''",
@@ -104,16 +106,18 @@ def _ensure_schema():
 
 def task_dict(task: Task, detail: bool = False):
     playback_url = task.source_playback_url
-    if not playback_url and task.source_type == "url" and task.source_url and is_direct_media_url(task.source_url):
+    if task.task_kind != "download" and not playback_url and task.source_type == "url" and task.source_url and is_direct_media_url(task.source_url):
         # Backfill direct-link playback for tasks created before this column
         # was introduced.
         playback_url = task.source_url
     data = {
         "id": task.id, "title": task.title, "source_type": task.source_type,
+        "task_kind": task.task_kind,
         "duration": task.duration, "language": task.language, "status": task.status,
         "progress": task.progress, "message": task.message, "error": task.error,
         "asr_provider": task.asr_provider, "ai_status": task.ai_status,
-        "ai_message": task.ai_message, "source_available": bool(task.media_path or playback_url),
+        "ai_message": task.ai_message,
+        "source_available": bool(task.media_path) if task.task_kind == "download" else bool(task.media_path or playback_url),
         "playback_url": playback_url if task.source_type == "url" else None,
         "visual_status": task.visual_status, "visual_message": task.visual_message,
         "media_kind": media_kind(task.media_path),
@@ -134,6 +138,13 @@ def owned_task(task_id: str, user: User, db: Session) -> Task:
     task = db.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id))
     if not task:
         raise HTTPException(404, "任务不存在")
+    return task
+
+
+def owned_transcription_task(task_id: str, user: User, db: Session) -> Task:
+    task = owned_task(task_id, user, db)
+    if task.task_kind != "transcription":
+        raise HTTPException(409, "此操作只适用于听写任务")
     return task
 
 
@@ -332,6 +343,28 @@ def url_task(body: UrlBody, user: User = Depends(current_user), db: Session = De
     return task_dict(task)
 
 
+@app.post("/api/tasks/download")
+def create_download_task(body: UrlBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Create a separate, time-limited original-video download task."""
+    try:
+        url = extract_video_url(body.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if urlparse(url).path.lower().endswith(tuple(AUDIO_SUFFIXES)):
+        raise HTTPException(400, "这个链接是音频文件；下载视频请粘贴视频链接")
+    task_id = str(uuid.uuid4())
+    (settings.data_dir / "tasks" / task_id).mkdir(parents=True, exist_ok=False)
+    task = Task(
+        id=task_id, user_id=user.id, title="网络视频", task_kind="download",
+        source_type="url", source_url=url, language="auto",
+        asr_provider="none", status="queued", message="等待下载",
+    )
+    db.add(task)
+    db.commit()
+    enqueue(download_source_task, task.id)
+    return task_dict(task)
+
+
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return task_dict(owned_task(task_id, user, db), detail=True)
@@ -339,7 +372,7 @@ def get_task(task_id: str, user: User = Depends(current_user), db: Session = Dep
 
 @app.patch("/api/tasks/{task_id}/transcript")
 def save_transcript(task_id: str, body: TranscriptBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db)
     task.segments = body.segments
     task.transcript_text = "\n".join(str(item.get("text", "")).strip() for item in body.segments if item.get("text"))
     db.commit()
@@ -348,7 +381,7 @@ def save_transcript(task_id: str, body: TranscriptBody, user: User = Depends(cur
 
 @app.post("/api/tasks/{task_id}/highlights")
 def start_highlights(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db)
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
     if task.ai_status not in {"idle", "failed"}:
@@ -361,7 +394,7 @@ def start_highlights(task_id: str, user: User = Depends(current_user), db: Sessi
 
 @app.post("/api/tasks/{task_id}/visual-analysis")
 def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db)
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
     if media_kind(task.media_path) == "audio":
@@ -381,7 +414,7 @@ def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: 
 
 @app.post("/api/tasks/{task_id}/rewrite")
 def start_rewrite(task_id: str, body: RewriteBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db)
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
     if task.ai_status not in {"idle", "failed"}:
@@ -431,9 +464,25 @@ def media(task_id: str, local: bool = False, user: User = Depends(current_user),
     return FileResponse(preview if preview.exists() else source)
 
 
+@app.get("/api/tasks/{task_id}/download")
+def download_task_file(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = owned_task(task_id, user, db)
+    if task.task_kind != "download":
+        raise HTTPException(409, "这条记录不是独立下载任务")
+    if task.status != "completed" or not task.media_path or not Path(task.media_path).is_file():
+        raise HTTPException(410, "下载文件不存在或已过期，请重新创建下载任务")
+    path = Path(task.media_path)
+    safe_title = re.sub(r'[\\/:*?"<>|\r\n]+', "_", task.title).strip(" .")[:140] or "视频"
+    filename = f"{safe_title}{path.suffix.lower()}"
+    return FileResponse(
+        path, filename=filename, media_type="application/octet-stream",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @app.get("/api/tasks/{task_id}/export/{kind}")
 def export(task_id: str, kind: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db)
     if kind == "txt":
         return PlainTextResponse(task.transcript_text or "", headers={"Content-Disposition": f'attachment; filename="{task.id[:8]}.txt"'})
     if kind == "srt":

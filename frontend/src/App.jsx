@@ -23,7 +23,15 @@ function Header({ page, setPage, user, onLogout }) {
       <button className={page === 'home' || page === 'detail' ? 'active' : ''} onClick={() => setPage('home')}>工作台</button>
       <button className={page === 'history' ? 'active' : ''} onClick={() => setPage('history')}>历史记录</button>
     </nav>
-    <div className="account"><span><UserRound size={18}/>{user?.username}</span><button title="账户设置" onClick={() => setPage('settings')}><SlidersHorizontal size={18}/></button><button title="退出登录" onClick={onLogout}><LogOut size={18}/></button></div>
+    <div className="account">
+      <div className="account-meta" aria-label="服务状态与访问范围">
+        <span className="service-state" title="ASR 服务在线"><i className="online"/><span>ASR 服务在线</span></span>
+        <span className="access-state" title="仅你可访问"><LockKeyhole size={15}/><span>仅你可访问</span></span>
+      </div>
+      <span className="account-user"><UserRound size={18}/><span>{user?.username}</span></span>
+      <button title="账户设置" aria-label="账户设置" onClick={() => setPage('settings')}><SlidersHorizontal size={18}/></button>
+      <button title="退出登录" aria-label="退出登录" onClick={onLogout}><LogOut size={18}/></button>
+    </div>
   </header>
 }
 
@@ -53,8 +61,11 @@ function Login({ onLogin }) {
 }
 
 function StatusMark({ task }) {
-  if (task.status === 'completed') return <span className="status success"><Check size={15}/>{STATUS[task.status]}</span>
-  if (task.status === 'failed') return <span className="status failed">失败</span>
+  if (task.status === 'completed') {
+    if (task.task_kind === 'download' && !task.source_available) return <span className="status">文件已过期</span>
+    return <span className="status success"><Check size={15}/>{task.task_kind === 'download' ? '可下载' : STATUS[task.status]}</span>
+  }
+  if (task.status === 'failed') return <span className="status failed">{task.task_kind === 'download' ? '下载失败' : '失败'}</span>
   if (['preparing','downloading','transcribing'].includes(task.status)) return <span className="status working"><LoaderCircle className="spin" size={15}/>{STATUS[task.status]} {task.progress}%</span>
   return <span className="status"><Clock3 size={15}/>{STATUS[task.status] || task.status}</span>
 }
@@ -81,19 +92,19 @@ function TaskTable({ tasks, onOpen, onDelete, full = false }) {
   }
   const removeSelected = async () => {
     const ids = [...selectedIds].filter(id => taskIds.includes(id))
-    if (!ids.length || !window.confirm(`确定删除选中的 ${ids.length} 条历史记录吗？听写稿、亮点和改写结果都会删除。`)) return
+    if (!ids.length || !window.confirm(`确定删除选中的 ${ids.length} 条任务记录吗？关联的文案、结果和临时文件都会删除。`)) return
     try { await Promise.all(ids.map(id => onDelete(id))); setSelectedIds(new Set()) }
     catch (err) { window.alert(err.message) }
   }
   return <section className={`recent ${full ? 'history-list' : ''}`}>
-    <div className="section-title"><h2>{full ? '全部听写记录' : '最近听写'}</h2>{full && <div className="history-actions"><span>{tasks.length} 条记录</span>{selectedIds.size > 0 && <button className="outline compact bulk-delete" onClick={removeSelected}><Trash2 size={15}/>删除选中 ({selectedIds.size})</button>}</div>}</div>
+    <div className="section-title"><h2>{full ? '全部任务记录' : '最近任务'}</h2>{full && <div className="history-actions"><span>{tasks.length} 条记录</span>{selectedIds.size > 0 && <button className="outline compact bulk-delete" onClick={removeSelected}><Trash2 size={15}/>删除选中 ({selectedIds.size})</button>}</div>}</div>
     <div className={`task-table ${full ? 'selectable' : ''}`}>
       <div className="task-head">{full && <label className="task-select-cell" onClick={event => event.stopPropagation()}><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="全选历史记录"/></label>}<span>标题</span><span>来源</span><span>时长</span><span>状态</span><span>时间</span><span/></div>
-      {tasks.length === 0 && <div className="empty">还没有听写记录，先上传一个视频吧。</div>}
+      {tasks.length === 0 && <div className="empty">还没有任务记录，先粘贴视频链接或上传素材吧。</div>}
       {tasks.map(task => <div className="task-row" role="button" tabIndex="0" key={task.id}
         onClick={() => onOpen(task.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onOpen(task.id) }}>
         {full && <span className="task-select-cell" onClick={event => event.stopPropagation()}><input type="checkbox" checked={selectedIds.has(task.id)} onChange={event => toggleOne(event, task.id)} aria-label={`选择${task.title}`}/></span>}
-        <span className="task-name">{task.media_kind === 'audio' ? <AudioLines size={22}/> : <Video size={22}/>}<b>{task.title}</b><small>{sourceDate(task.created_at)}</small></span>
+        <span className="task-name">{task.task_kind === 'download' ? <Download size={22}/> : task.media_kind === 'audio' ? <AudioLines size={22}/> : <Video size={22}/>}<b>{task.title}</b><small>{sourceDate(task.created_at)}</small></span>
         <span>{task.source_platform || (task.source_type === 'url' ? '视频链接' : '本地文件')}</span>
         <span>{clock(task.duration)}</span><StatusMark task={task}/>
         <span>{friendlyDate(task.created_at)}</span>
@@ -106,6 +117,7 @@ function TaskTable({ tasks, onOpen, onDelete, full = false }) {
 function Home({ tasks, refresh, onOpen }) {
   const [file, setFile] = useState(null)
   const [input, setInput] = useState('')
+  const [mode, setMode] = useState('transcribe')
   const [drag, setDrag] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -113,12 +125,12 @@ function Home({ tasks, refresh, onOpen }) {
   const submit = async (nextFile = file, nextInput = input) => {
     setBusy(true); setError('')
     try {
-      const task = nextFile ? await api.upload(nextFile) : await api.url(nextInput)
+      const task = mode === 'download' ? await api.download(nextInput) : nextFile ? await api.upload(nextFile) : await api.url(nextInput)
       await refresh(); onOpen(task.id)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
   const choose = (selected) => {
-    if (!selected || busy) return
+    if (!selected || busy || mode === 'download') return
     setFile(selected); setInput(''); setError('')
     // Selecting or dropping a file is the upload confirmation. Start the
     // transcription request immediately instead of requiring a second click.
@@ -129,9 +141,13 @@ function Home({ tasks, refresh, onOpen }) {
       <h1>把视频，变成可编辑的文字</h1>
       <p>粘贴视频链接或分享文案，也可以直接上传视频、音频，先完成听写，再决定下一步。</p>
     </section>
+    <div className="mode-tabs" role="tablist" aria-label="选择任务类型">
+      <button type="button" role="tab" aria-selected={mode === 'transcribe'} className={mode === 'transcribe' ? 'selected' : ''} onClick={() => { setMode('transcribe'); setError('') }}><AudioLines size={19}/>听写文案</button>
+      <button type="button" role="tab" aria-selected={mode === 'download'} className={mode === 'download' ? 'selected' : ''} onClick={() => { setMode('download'); setFile(null); setError('') }}><Download size={19}/>下载视频</button>
+    </div>
     <div className={`unified-input ${drag ? 'drag' : ''} ${file ? 'has-file' : ''}`}
-      onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
-      onDrop={e => { e.preventDefault(); setDrag(false); choose(e.dataTransfer.files[0]) }}>
+      onDragOver={e => { if (mode === 'transcribe') { e.preventDefault(); setDrag(true) } }} onDragLeave={() => setDrag(false)}
+      onDrop={e => { e.preventDefault(); setDrag(false); if (mode === 'transcribe') choose(e.dataTransfer.files[0]); else setError('下载模式请粘贴视频链接或分享文案。') }}>
       <Link2 size={24} className="unified-input-icon" />
       <input value={file ? file.name : input} onChange={e => { setInput(e.target.value); setFile(null) }} onKeyDown={event => {
         // Let the IME finish composing Chinese text first; a confirmed Enter
@@ -140,15 +156,15 @@ function Home({ tasks, refresh, onOpen }) {
           event.preventDefault()
           if (!busy && (file || input.trim())) submit()
         }
-      }} placeholder="粘贴视频链接或整段分享文案…" aria-label="视频链接或分享文案" />
-      <input ref={inputRef} type="file" accept="video/*,audio/*" hidden disabled={busy} onChange={e => { choose(e.target.files[0]); e.target.value = '' }}/>
-      <button type="button" className="upload-button" disabled={busy} onClick={() => inputRef.current?.click()}><Upload size={18}/>上传</button>
+      }} placeholder={mode === 'download' ? '粘贴要下载的视频链接或分享文案…' : '粘贴视频链接或整段分享文案…'} aria-label="视频链接或分享文案" />
+      <input ref={inputRef} type="file" accept="video/*,audio/*" hidden disabled={busy || mode === 'download'} onChange={e => { choose(e.target.files[0]); e.target.value = '' }}/>
+      {mode === 'transcribe' && <button type="button" className="upload-button" disabled={busy} onClick={() => inputRef.current?.click()}><Upload size={18}/>上传</button>}
       {file && <span className="file-pill">{file.type.startsWith('audio/') ? <AudioLines size={16}/> : <Video size={16}/>} {fileSize(file.size)}</span>}
     </div>
-    <p className="unified-hint">支持 MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB；选择或拖入文件后会自动上传并开始听写</p>
-    <div className="submit-row"><button className="primary" disabled={busy || (!file && !input.trim())} onClick={() => submit()}>
-      {busy ? <LoaderCircle className="spin" size={20}/> : <span className="mini-wave"><i/><i/><i/></span>}开始听写
-    </button><span>{busy ? '正在上传并创建任务…' : '只进行语音听写，不会自动调用 AI；长视频会自动切换为音频模式。'}</span></div>
+    <p className="unified-hint">{mode === 'download' ? '支持抖音、小红书、B站等可解析链接；服务器临时保留 24 小时。需要登录的平台视频，普通账号不会借用管理员登录状态。' : '支持 MP4、MOV、MKV、WebM、MP3、WAV、M4A，单个文件最大 2GB；选择或拖入文件后会自动上传并开始听写'}</p>
+    <div className="submit-row"><button className="primary" disabled={busy || (mode === 'download' ? !input.trim() : !file && !input.trim())} onClick={() => submit()}>
+      {busy ? <LoaderCircle className="spin" size={20}/> : mode === 'download' ? <Download size={19}/> : <span className="mini-wave"><i/><i/><i/></span>}{mode === 'download' ? '开始下载' : '开始听写'}
+    </button><span>{busy ? mode === 'download' ? '正在解析并下载视频…' : '正在上传并创建任务…' : mode === 'download' ? '只下载原视频，不会自动听写或调用 AI。' : '只进行语音听写，不会自动调用 AI；长视频会自动切换为音频模式。'}</span></div>
     {error && <div className="error-line spacious">{error}</div>}
     <TaskTable tasks={tasks.slice(0, 5)} onOpen={onOpen}/>
   </main>
@@ -307,6 +323,11 @@ function Detail({ taskId, onBack }) {
     setMediaMode(current => current === 'remote' ? 'local' : 'failed')
   }
   if (!task) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
+  if (task.task_kind === 'download') {
+    if (task.status === 'completed') return <DownloadReady task={task} onBack={onBack}/>
+    if (task.status === 'failed') return <main className="processing shell"><button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button><div className="processing-center"><span className="process-icon failed"><RotateCcw/></span><h1>视频下载失败</h1><p>{task.error || task.message}</p></div></main>
+    return <main className="processing shell"><button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button><div className="processing-center"><span className="process-icon"><LoaderCircle className="spin"/></span><h1>{task.message || '正在下载视频'}</h1><p>{task.title}</p><div className="big-progress"><i style={{width: `${task.progress}%`}}/></div><b>{task.progress}%</b></div></main>
+  }
   if (task.status !== 'completed') return <main className="processing shell"><button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button><div className="processing-center">
     {task.status === 'failed' ? <><span className="process-icon failed"><RotateCcw/></span><h1>听写失败</h1><p>{task.error}</p></> : <><span className="process-icon"><LoaderCircle className="spin"/></span><h1>{task.message}</h1><p>{task.title}</p><div className="big-progress"><i style={{width: `${task.progress}%`}}/></div><b>{task.progress}%</b></>}
   </div></main>
@@ -359,6 +380,19 @@ function Detail({ taskId, onBack }) {
         {notice && <div className="notice">{notice}</div>}
       </aside>
     </div>
+  </main>
+}
+
+function DownloadReady({ task, onBack }) {
+  return <main className="download-ready shell">
+    <button className="back" onClick={onBack}><ArrowLeft size={18}/>返回工作台</button>
+    <section className="download-card">
+      <span className="process-icon"><Check/></span>
+      <h1>{task.source_available ? '视频已准备好' : '下载文件已过期'}</h1>
+      <h2>{task.title}</h2>
+      <p>{task.source_platform || '网络视频'} · {sourceDate(task.created_at)}</p>
+      {task.source_available ? <><a className="primary" href={`/api/tasks/${task.id}/download`}><Download size={19}/>保存视频到电脑</a><small>文件会在 24 小时后从服务器自动清理；你下载到电脑的副本不受影响。</small></> : <p className="expired-note">服务器临时文件已自动清理。请回到首页重新提交链接。</p>}
+    </section>
   </main>
 }
 
@@ -505,14 +539,13 @@ function App() {
   const open = id => { setSelected(id); setPage('detail') }
   return <div className="app"><Header page={page} setPage={setPage} user={user} onLogout={async () => { await api.logout(); setUser(null) }}/>
     {page === 'home' && <Home tasks={tasks} refresh={refresh} onOpen={open}/>} 
-    {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>历史记录</h1><p>你的听写、亮点与改编结果都保存在这里。</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full/></main>}
+    {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>历史记录</h1><p>你的听写稿、AI 分析和下载任务都保存在这里。</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full/></main>}
     {page === 'settings' && <SettingsPage user={user} onBack={() => setPage('home')}/>}
     {page === 'detail' && selected && (
       <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} />
     )}
     {importing && <div className="notice"><LoaderCircle className="spin" size={16}/>正在导入日报视频…</div>}
     {importError && <div className="notice import-error">{importError}</div>}
-    <footer className="statusbar"><span><span className="footer-wave"><i/><i/><i/></span><i className="online"/>ASR 服务在线</span><span><LockKeyhole size={15}/>仅你可访问</span></footer>
   </div>
 }
 
