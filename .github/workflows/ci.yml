@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Compile backend
+        run: python -m compileall -q backend/app
+
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Lint frontend
+        run: npm run lint --prefix frontend
+      - name: Build frontend
+        run: npm run build --prefix frontend
+
+
+  deploy:
+    name: Deploy production after CI
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Check whether production source changed
+        id: scope
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          changed_files="$(git diff --name-only "$BEFORE_SHA" "$TARGET_SHA")"
+          if grep -Eiv '^(\.github/|docs/|README([^/]*)?$|AGENTS\.md$|CONTRIBUTING\.md$|.*\.md$)' <<<"$changed_files" | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Queue signed deployment and wait for the server
+        if: steps.scope.outputs.changed == 'true'
+        env:
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
+          DEPLOY_URL: https://ad.gaoseafood.com/api/deploy-hook/tingjian
+          DEPLOY_STATUS_URL: https://ad.gaoseafood.com/api/deploy-hook/tingjian/status
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          TARGET_SHA: ${{ github.sha }}
+          DELIVERY_ID: ${{ github.run_id }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHmac } from 'node:crypto'
+          const secret = process.env.DEPLOY_SECRET
+          if (!secret || secret.length < 32) throw new Error('deployment secret is not configured')
+          const payload = {
+            repository: { full_name: process.env.REPOSITORY },
+            ref: process.env.REF,
+            before: process.env.BEFORE_SHA,
+            after: process.env.TARGET_SHA,
+          }
+          const body = JSON.stringify(payload)
+          const signature = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex')
+          const accepted = await fetch(process.env.DEPLOY_URL, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-github-event': 'push',
+              'x-github-delivery': process.env.DELIVERY_ID,
+              'x-hub-signature-256': signature,
+            },
+            body,
+          })
+          const receipt = await accepted.json()
+          if (!accepted.ok || receipt.queued !== true) throw new Error('server did not queue the deployment')
+          const statusUrl = new URL(process.env.DEPLOY_STATUS_URL)
+          statusUrl.searchParams.set('sha', process.env.TARGET_SHA)
+          for (let attempt = 0; attempt < 120; attempt++) {
+            const response = await fetch(statusUrl, { headers: { 'x-deploy-token': secret } })
+            const state = await response.json()
+            if (!response.ok) throw new Error('server deployment status could not be read')
+            if (state.status === 'succeeded') {
+              console.log('Production deployment succeeded for ' + state.sha)
+              process.exit(0)
+            }
+            if (state.status === 'failed') throw new Error('Production deployment failed: ' + (state.message || 'see server deployment logs'))
+            await new Promise(resolve => setTimeout(resolve, 10000))
+          }
+          throw new Error('Timed out waiting for the server deployment')
+          NODE
