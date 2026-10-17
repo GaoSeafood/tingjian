@@ -18,6 +18,7 @@ jobs:
       pull-requests: write
       checks: read
       statuses: read
+      actions: write
     steps:
       - name: Validate trusted source and change scope
         id: gate
@@ -56,7 +57,7 @@ jobs:
           fi
 
           files="$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')"
-          if grep -Eiq '(^\.github/|(^|/)(Dockerfile[^/]*|docker-compose[^/]*)$|(^|/)(deploy|ops)/|(^|/)(migrations?|schema|database)(/|$)|(^|/)(models?\.py|[^/]*Model\.php)$|(^|/)\.env($|\.)|(^|/)AGENTS\.md$)' <<<"$files"; then
+          if grep -Eiq '(^\.github/|(^|/)(Dockerfile[^/]*|docker-compose[^/]*)$|(^|/)(deploy|ops)/|(^|/)(model|models|migrations?|schema|database)(/|$)|(^|/)(models?\.py|[^/]*Model\.php)$|(^|/)\.env($|\.)|(^|/)AGENTS\.md$)' <<<"$files"; then
             echo "A workflow, deployment, schema, or environment file changed; manual review is required."
             if ! gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" --jq '.[].body' | grep -Fq 'requires manual review'; then
               gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body "Automatic merge paused: this PR changes a workflow, deployment, schema, or environment file and requires manual review."
@@ -65,6 +66,7 @@ jobs:
           fi
 
           echo "head_sha=$(jq -r '.head.sha' <<<"$pr_json")" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
           echo "eligible=true" >> "$GITHUB_OUTPUT"
 
       - name: Wait for every check on this exact commit
@@ -74,6 +76,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
+          BASE_REF: ${{ steps.gate.outputs.base_ref }}
         shell: bash
         run: |
           set -euo pipefail
@@ -116,7 +119,7 @@ jobs:
           [[ "$ready" == true ]] || { echo "Checks did not reach a stable success state."; exit 1; }
 
           current="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '[.state,.head.sha,.base.ref,.head.repo.full_name] | @tsv')"
-          expected="$(printf 'open\t%s\t%s\t%s' "$HEAD_SHA" "$(jq -r '.base.ref' <<<"$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")")" "$GH_REPO")"
+          expected="$(printf 'open\t%s\t%s\t%s' "$HEAD_SHA" "${BASE_REF}" "$GH_REPO")"
           [[ "$current" == "$expected" ]] || { echo "PR head or base changed while checks were running."; exit 1; }
 
       - name: Merge after checks pass
@@ -126,3 +129,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: gh pr merge "$PR_NUMBER" --repo "$GH_REPO" --merge --delete-branch
+
+      - name: Trigger CI and deployment after automatic merge
+        if: steps.gate.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASE_REF: ${{ steps.gate.outputs.base_ref }}
+        run: gh workflow run ci.yml --repo "$GH_REPO" --ref "$BASE_REF"

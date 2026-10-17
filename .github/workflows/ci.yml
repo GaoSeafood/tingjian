@@ -43,7 +43,7 @@ jobs:
 
   deploy:
     name: Deploy production after CI
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [backend, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -61,7 +61,10 @@ jobs:
           TARGET_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          changed_files="$(git diff --name-only "$BEFORE_SHA" "$TARGET_SHA")"
+          before_sha="$BEFORE_SHA"
+          if [[ -z "$before_sha" || "$before_sha" =~ ^0+$ ]]; then before_sha="$(git rev-parse "$TARGET_SHA^" 2>/dev/null || true)"; fi
+          if [[ -z "$before_sha" ]]; then changed_files="$(git diff-tree --no-commit-id --name-only -r "$TARGET_SHA")"; else changed_files="$(git diff --name-only "$before_sha" "$TARGET_SHA")"; fi
+          echo "before_sha=$before_sha" >> "$GITHUB_OUTPUT"
           if grep -Eiv '^(\.github/|docs/|README([^/]*)?$|AGENTS\.md$|CONTRIBUTING\.md$|.*\.md$)' <<<"$changed_files" | grep -q .; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
@@ -75,7 +78,7 @@ jobs:
           DEPLOY_STATUS_URL: https://ad.gaoseafood.com/api/deploy-hook/tingjian/status
           REPOSITORY: ${{ github.repository }}
           REF: ${{ github.ref }}
-          BEFORE_SHA: ${{ github.event.before }}
+          BEFORE_SHA: ${{ steps.scope.outputs.before_sha }}
           TARGET_SHA: ${{ github.sha }}
           DELIVERY_ID: ${{ github.run_id }}
         run: |
