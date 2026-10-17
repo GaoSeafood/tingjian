@@ -1,0 +1,128 @@
+name: Trusted PR auto-merge
+
+on:
+  pull_request_target:
+    branches: [main, master]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    name: trusted-auto-merge
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+    steps:
+      - name: Validate trusted source and change scope
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_json="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")"
+          head_repo="$(jq -r '.head.repo.full_name // ""' <<<"$pr_json")"
+          head_ref="$(jq -r '.head.ref' <<<"$pr_json")"
+          base_ref="$(jq -r '.base.ref' <<<"$pr_json")"
+          author="$(jq -r '.user.login' <<<"$pr_json" | tr '[:upper:]' '[:lower:]')"
+          repo_lower="$(tr '[:upper:]' '[:lower:]' <<<"$GH_REPO")"
+
+          [[ "$(tr '[:upper:]' '[:lower:]' <<<"$head_repo")" == "$repo_lower" ]] || {
+            echo "External fork PRs require human review."
+            exit 0
+          }
+          [[ "$base_ref" == main || "$base_ref" == master ]] || exit 0
+          case "$head_ref" in
+            automation/upstream-sync|codex/*|GaoSeafood/*|dependabot/*) ;;
+            *) echo "Branch is outside the auto-merge allowlist."; exit 0 ;;
+          esac
+          case "$author" in
+            gaoseafood|github-actions[bot]|dependabot[bot]) ;;
+            *) echo "PR author is outside the auto-merge allowlist."; exit 0 ;;
+          esac
+
+          labels="$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/labels" --jq '.[].name' || true)"
+          if grep -Eiq '^(do-not-merge|manual-review|security-review)$' <<<"$labels"; then
+            echo "A review label blocks automatic merging."
+            exit 0
+          fi
+
+          files="$(gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')"
+          if grep -Eiq '(^\.github/|(^|/)(Dockerfile[^/]*|docker-compose[^/]*)$|(^|/)(deploy|ops)/|(^|/)(migrations?|schema|database)(/|$)|(^|/)(models?\.py|[^/]*Model\.php)$|(^|/)\.env($|\.)|(^|/)AGENTS\.md$)' <<<"$files"; then
+            echo "A workflow, deployment, schema, or environment file changed; manual review is required."
+            if ! gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" --jq '.[].body' | grep -Fq 'requires manual review'; then
+              gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body "Automatic merge paused: this PR changes a workflow, deployment, schema, or environment file and requires manual review."
+            fi
+            exit 0
+          fi
+
+          echo "head_sha=$(jq -r '.head.sha' <<<"$pr_json")" >> "$GITHUB_OUTPUT"
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for every check on this exact commit
+        if: steps.gate.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ steps.gate.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in $(seq 1 120); do
+            checks="$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/check-runs?per_page=100")"
+            check_state="$(jq -r '
+              [.check_runs[] | select((.name | ascii_downcase | contains("auto-merge")) | not)] as $runs
+              | if ($runs | length) == 0 then "pending"
+                elif any($runs[]; .status != "completed") then "pending"
+                elif any($runs[]; .conclusion != "success" and .conclusion != "skipped") then "failed"
+                elif any($runs[]; .conclusion == "success") then "success"
+                else "failed" end
+            ' <<<"$checks")"
+            statuses="$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/statuses")"
+            status_state="$(jq -r '
+              if any(.[]; .state == "pending") then "pending"
+              elif any(.[]; .state != "success") then "failed"
+              else "success" end
+            ' <<<"$statuses")"
+
+            if [[ "$check_state" == failed || "$status_state" == failed ]]; then
+              echo "A check failed or was cancelled; leaving the PR open."
+              exit 1
+            fi
+            if [[ "$check_state" == success && "$status_state" == success ]]; then
+              sleep 20
+              checks="$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/check-runs?per_page=100")"
+              check_state="$(jq -r '
+                [.check_runs[] | select((.name | ascii_downcase | contains("auto-merge")) | not)] as $runs
+                | if ($runs | length) > 0 and all($runs[]; .status == "completed" and (.conclusion == "success" or .conclusion == "skipped")) and any($runs[]; .conclusion == "success") then "success" else "pending" end
+              ' <<<"$checks")"
+              if [[ "$check_state" == success ]]; then
+                ready=true
+                break
+              fi
+            fi
+            sleep 10
+          done
+          [[ "$ready" == true ]] || { echo "Checks did not reach a stable success state."; exit 1; }
+
+          current="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '[.state,.head.sha,.base.ref,.head.repo.full_name] | @tsv')"
+          expected="$(printf 'open\t%s\t%s\t%s' "$HEAD_SHA" "$(jq -r '.base.ref' <<<"$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")")" "$GH_REPO")"
+          [[ "$current" == "$expected" ]] || { echo "PR head or base changed while checks were running."; exit 1; }
+
+      - name: Merge after checks pass
+        if: steps.gate.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --repo "$GH_REPO" --merge --delete-branch
