@@ -29,3 +29,12 @@ Read `README.md` for the product overview and setup instructions before making l
 
 - Keep `.env`, runtime data, generated `output/`, browser profiles, build output, and Python caches out of Git.
 - Do not add credentials or user media to logs, screenshots, or test fixtures.
+
+
+## Production server paths and backups
+
+Verified on 2026-10-14:
+
+- The deployment root is `/opt/1panel/apps/tingjian`. Application uploads and state are under `data/app`; PostgreSQL and Redis state are under `data/postgres` and `data/redis` in the same app tree.
+- Keep rollback/history archives under `/home/opc/app-backups/tingjian/`, separate from live application data and outside Git.
+- Preserve useful historical rollback archives. Delete only temporary copies created by a migration after the new mounts, service health, and database integrity have been verified.
