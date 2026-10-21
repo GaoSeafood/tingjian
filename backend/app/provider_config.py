@@ -9,7 +9,7 @@ from .database import SessionLocal
 from .models import AppSetting
 
 
-SECRET_KEYS = {"mimo_api_key", "custom_asr_api_key", "assemblyai_api_key", "tencent_secret_id", "tencent_secret_key", "sub2api_api_key", "sub2api_fallback_api_key"}
+SECRET_KEYS = {"mimo_api_key", "siliconflow_api_key", "custom_asr_api_key", "assemblyai_api_key", "tencent_secret_id", "tencent_secret_key", "sub2api_api_key", "sub2api_fallback_api_key"}
 
 
 def _fernet() -> Fernet:
@@ -34,6 +34,9 @@ def provider_config() -> dict:
         "mimo_api_key": settings.mimo_api_key,
         "mimo_base_url": settings.mimo_base_url,
         "mimo_model": settings.mimo_model,
+        "siliconflow_base_url": settings.siliconflow_base_url,
+        "siliconflow_api_key": settings.siliconflow_api_key,
+        "siliconflow_model": settings.siliconflow_model,
         "asr_language": settings.asr_language,
         "custom_asr_base_url": settings.custom_asr_base_url,
         "custom_asr_api_key": settings.custom_asr_api_key,
@@ -60,7 +63,8 @@ def provider_config() -> dict:
 
 def update_provider_config(values: dict) -> dict:
     allowed = {
-        "asr_provider", "mimo_api_key", "mimo_base_url", "mimo_model", "asr_language",
+        "asr_provider", "mimo_api_key", "mimo_base_url", "mimo_model",
+        "siliconflow_base_url", "siliconflow_api_key", "siliconflow_model", "asr_language",
         "custom_asr_base_url", "custom_asr_api_key", "custom_asr_model",
         "assemblyai_base_url", "assemblyai_api_key", "assemblyai_model",
         "tencent_app_id", "tencent_secret_id", "tencent_secret_key", "tencent_engine_type",
@@ -93,6 +97,9 @@ def public_provider_config() -> dict:
         "mimo_model": cfg["mimo_model"],
         "asr_language": cfg["asr_language"],
         "mimo_api_key_configured": bool(cfg["mimo_api_key"]),
+        "siliconflow_base_url": cfg["siliconflow_base_url"],
+        "siliconflow_model": cfg["siliconflow_model"],
+        "siliconflow_api_key_configured": bool(cfg["siliconflow_api_key"]),
         "custom_asr_base_url": cfg["custom_asr_base_url"],
         "custom_asr_model": cfg["custom_asr_model"],
         "custom_asr_api_key_configured": bool(cfg["custom_asr_api_key"]),

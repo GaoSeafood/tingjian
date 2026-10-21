@@ -14,6 +14,11 @@ class Settings:
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     session_secret: str = os.getenv("SESSION_SECRET", "dev-only-change-me")
     session_max_age: int = int(os.getenv("SESSION_MAX_AGE", str(30 * 24 * 3600)))
+    resend_api_key: str = os.getenv("RESEND_API_KEY", "")
+    mail_from: str = os.getenv("MAIL_FROM", "听见 <onboarding@resend.dev>")
+    app_public_url: str = os.getenv("APP_PUBLIC_URL", "http://localhost:18092").rstrip("/")
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     secure_cookie: bool = _bool("SECURE_COOKIE", False)
     admin_username: str = os.getenv("ADMIN_USERNAME", "admin")
     admin_password: str = os.getenv("ADMIN_PASSWORD", "change-me")
@@ -24,6 +29,9 @@ class Settings:
     mimo_api_key: str = os.getenv("MIMO_API_KEY", "")
     mimo_base_url: str = os.getenv("MIMO_BASE_URL", "https://api.xiaomimimo.com/v1")
     mimo_model: str = os.getenv("MIMO_MODEL", "mimo-v2.5-asr")
+    siliconflow_base_url: str = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
+    siliconflow_api_key: str = os.getenv("SILICONFLOW_API_KEY", "")
+    siliconflow_model: str = os.getenv("SILICONFLOW_MODEL", "FunAudioLLM/SenseVoiceSmall")
     asr_language: str = os.getenv("ASR_LANGUAGE", "auto")
     # Three-minute chunks are a better default for OpenAI-compatible ASR
     # providers while remaining comfortably below MiMo's payload limit.
@@ -33,6 +41,7 @@ class Settings:
     # file lives in the persistent app-data volume and is never exposed via
     # the API.
     douyin_cookie_file: Path = Path(os.getenv("DOUYIN_COOKIE_FILE", str(Path(os.getenv("DATA_DIR", "/data")) / "secrets" / "douyin-cookies.txt")))
+    douyin_user_agent_file: Path = Path(os.getenv("DOUYIN_USER_AGENT_FILE", str(Path(os.getenv("DATA_DIR", "/data")) / "secrets" / "douyin-user-agent.txt")))
     visual_max_frames: int = int(os.getenv("VISUAL_MAX_FRAMES", "48"))
     visual_min_interval_seconds: int = int(os.getenv("VISUAL_MIN_INTERVAL_SECONDS", "4"))
     custom_asr_base_url: str = os.getenv("CUSTOM_ASR_BASE_URL", "")
@@ -56,3 +65,4 @@ settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
 (settings.data_dir / "tasks").mkdir(parents=True, exist_ok=True)
 settings.douyin_cookie_file.parent.mkdir(parents=True, exist_ok=True)
+settings.douyin_user_agent_file.parent.mkdir(parents=True, exist_ok=True)

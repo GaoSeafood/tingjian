@@ -8,9 +8,13 @@ from .config import settings
 
 redis = Redis.from_url(settings.redis_url)
 queue = Queue("tingjian", connection=redis, default_timeout=settings.job_timeout_seconds)
+pro_queue = Queue("tingjian-pro", connection=redis, default_timeout=settings.job_timeout_seconds)
+ultra_queue = Queue("tingjian-ultra", connection=redis, default_timeout=settings.job_timeout_seconds)
 # AI actions live on their own queue so a slow URL download or long ASR job
 # cannot leave a user-facing rewrite/highlight request waiting indefinitely.
 ai_queue = Queue("tingjian-ai", connection=redis, default_timeout=settings.job_timeout_seconds)
+pro_ai_queue = Queue("tingjian-pro-ai", connection=redis, default_timeout=settings.job_timeout_seconds)
+ultra_ai_queue = Queue("tingjian-ultra-ai", connection=redis, default_timeout=settings.job_timeout_seconds)
 
 
 def transcription_failure(job, connection, exc_type, exc_value, traceback):
@@ -46,5 +50,22 @@ def enqueue(func, *args):
     options = {"job_timeout": settings.job_timeout_seconds, "result_ttl": 86400, "failure_ttl": 604800}
     if getattr(func, "__name__", "") in {"transcribe_task", "download_source_task"}:
         options["on_failure"] = transcription_failure
-    target = ai_queue if getattr(func, "__name__", "") in {"highlight_task", "analyze_visual_task", "rewrite_task"} else queue
+    priority = "normal"
+    if args and isinstance(args[0], str):
+        from .billing import get_entitlement
+        from .database import SessionLocal
+        from .models import Task, User
+
+        with SessionLocal() as db:
+            task = db.get(Task, args[0])
+            if task:
+                owner = db.get(User, task.user_id)
+                if owner:
+                    _, plan = get_entitlement(db, owner)
+                    if owner.role == "admin" or plan.code.startswith("ultra_"):
+                        priority = "ultra"
+                    elif plan.code.startswith("pro_"):
+                        priority = "pro"
+    is_ai = getattr(func, "__name__", "") in {"highlight_task", "analyze_visual_task", "rewrite_task", "summarize_task", "translate_task"}
+    target = (ultra_ai_queue if priority == "ultra" else pro_ai_queue if priority == "pro" else ai_queue) if is_ai else (ultra_queue if priority == "ultra" else pro_queue if priority == "pro" else queue)
     return target.enqueue(func, *args, **options)

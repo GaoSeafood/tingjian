@@ -88,3 +88,19 @@ def rewrite_script(title: str, transcript: str, direction: str) -> str:
         {"role": "user", "content": f"""原稿标题：{title}\n改编方向：{direction or '保留核心主题，改成更自然有吸引力的中文口播'}\n\n原稿：\n{transcript}\n\n请输出可直接使用的新口播稿，并在末尾附上三条结构说明。"""},
     ]
     return _call(messages).strip()
+
+
+def summarize_transcript(title: str, transcript: str) -> str:
+    messages = [
+        {"role": "system", "content": "你是严谨的视频内容编辑。只根据原文总结，不补充原文没有的事实。"},
+        {"role": "user", "content": f"请用简体中文总结视频《{title}》的听写稿，给出一句话概述、3-6条要点和适合检索的关键词。保持具体、忠于原文。\n\n{transcript}"},
+    ]
+    return _call(messages).strip()
+
+
+def translate_transcript(title: str, transcript: str, language: str) -> str:
+    messages = [
+        {"role": "system", "content": f"你是专业译者。将用户给出的文字完整翻译成{language}，保持人名、数字和语气准确；不要摘要、解释或添加内容。"},
+        {"role": "user", "content": f"视频标题：{title}\n\n需要翻译的听写稿：\n{transcript}"},
+    ]
+    return _call(messages).strip()

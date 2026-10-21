@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 import re
 import shutil
 
@@ -9,8 +10,8 @@ from .config import settings
 from .database import SessionLocal
 from .models import Task, User, utcnow
 from .services.asr import ASRClient
-from .services.llm import find_highlights, rewrite_script
-from .services.media import download_original_video, download_video, ensure_browser_preview, extract_audio, media_kind, probe_duration, split_audio
+from .services.llm import find_highlights, rewrite_script, summarize_transcript, translate_transcript
+from .services.media import AUDIO_SUFFIXES, _direct_media_suffix, download_original_video, download_video, ensure_browser_preview, ensure_cover_image, ensure_download_audio, extract_audio, media_kind, probe_duration, split_audio
 from .services.vision import analyze_visuals
 
 
@@ -54,23 +55,45 @@ def _title_from_transcript(text: str) -> str:
 
 
 def transcribe_task(task_id: str):
+    from .billing import reserve_minutes, settle_minutes
     with SessionLocal() as db:
         task = db.get(Task, task_id)
         if not task:
             return
         task_dir = settings.data_dir / "tasks" / task.id
+        duration = 0.0
         try:
             _update(db, task, status="preparing", progress=5, message="正在准备视频", error=None)
             audio_only = False
             if task.source_type == "url":
-                _update(db, task, status="downloading", progress=8, message="正在下载视频")
-                media_path, title, audio_only, playback_url = download_video(task.source_url or "", task_dir)
-                task.media_path, task.title, task.source_playback_url = str(media_path), title, playback_url or task.source_playback_url
+                _update(db, task, status="downloading", progress=8, message="正在准备听写音频和播放地址")
+                media_path, title, audio_only, playback_url, playback_audio_url = download_video(task.source_url or "", task_dir)
+                task.media_path, task.title = str(media_path), title
+                task.source_playback_url = playback_url
+                task.source_playback_audio_url = playback_audio_url
+                if playback_url:
+                    playback_suffix = _direct_media_suffix(playback_url) or Path(urlparse(playback_url).path).suffix.lower()
+                    task.source_playback_kind = "audio" if playback_suffix in AUDIO_SUFFIXES else "video"
+                else:
+                    task.source_playback_kind = None
                 db.commit()
             else:
                 media_path = Path(task.media_path or "")
             duration = probe_duration(media_path)
+            reserve_minutes(db, task, duration)
             long_media = duration >= settings.url_audio_only_minutes * 60
+            if media_kind(media_path) == "video":
+                _update(db, task, progress=9, message="正在整理视频素材")
+                try:
+                    ensure_cover_image(media_path, task_dir)
+                except Exception:
+                    # A missing cover must not block transcription.
+                    pass
+                try:
+                    ensure_download_audio(media_path, task_dir)
+                except Exception:
+                    # Audio export is an optional convenience, not an ASR dependency.
+                    pass
             if audio_only or media_kind(media_path) == "audio":
                 _update(db, task, progress=10, message="长视频已切换为音频听写模式")
             elif long_media:
@@ -133,8 +156,10 @@ def transcribe_task(task_id: str):
                 transcript_text="\n".join(text_parts), segments=segments,
                 source_delete_at=utcnow() + timedelta(hours=settings.source_retention_hours),
             )
+            settle_minutes(db, task.id, duration, success=True)
             _schedule_cleanup(task.id, timedelta(hours=settings.source_retention_hours))
         except Exception as exc:
+            settle_minutes(db, task.id, duration, success=False)
             deadline = utcnow() + timedelta(hours=settings.source_retention_hours)
             _update(db, task, status="failed", message="听写失败", error=str(exc), source_delete_at=deadline)
             try:
@@ -190,6 +215,7 @@ def download_source_task(task_id: str):
 
 
 def highlight_task(task_id: str):
+    from .billing import settle_ai_use
     with SessionLocal() as db:
         task = db.get(Task, task_id)
         if not task:
@@ -198,27 +224,42 @@ def highlight_task(task_id: str):
             _update(db, task, ai_status="highlighting", ai_message="Gemini 正在寻找亮点")
             highlights = find_highlights(task.title, task.segments or [], task.visual_analysis or [])
             _update(db, task, highlights=highlights, ai_status="idle", ai_message="亮点分析完成")
+            settle_ai_use(db, task.id, "highlights", True)
         except Exception as exc:
             db.rollback()
             _update(db, task, ai_status="failed", ai_message=str(exc))
+            settle_ai_use(db, task.id, "highlights", False)
 
 
 def analyze_visual_task(task_id: str):
+    from .billing import settle_ai_use
     with SessionLocal() as db:
         task = db.get(Task, task_id)
         if not task:
             return
+        temporary_dir = None
         try:
             _update(db, task, visual_status="analyzing", visual_message="正在抽取关键帧并分析画面")
             media_path = Path(task.media_path or "")
+            if (not media_path.is_file() or media_kind(media_path) == "audio") and task.source_type == "url" and task.source_url:
+                temporary_dir = settings.data_dir / "tasks" / task.id / "visual-source"
+                media_path, _ = download_original_video(task.source_url, temporary_dir, use_douyin_cookies=True)
+            if not media_path.is_file() or media_kind(media_path) == "audio":
+                raise RuntimeError("没有可用的视频画面，无法分析")
             result = analyze_visuals(task.title, task.transcript_text or "", task.segments or [], media_path, settings.data_dir / "tasks" / task.id)
             _update(db, task, visual_analysis=result, visual_status="completed", visual_message="画面分析完成")
+            settle_ai_use(db, task.id, "visual", True)
         except Exception as exc:
             db.rollback()
             _update(db, task, visual_status="failed", visual_message=str(exc)[:300])
+            settle_ai_use(db, task.id, "visual", False)
+        finally:
+            if temporary_dir:
+                shutil.rmtree(temporary_dir, ignore_errors=True)
 
 
 def rewrite_task(task_id: str, direction: str):
+    from .billing import settle_ai_use
     with SessionLocal() as db:
         task = db.get(Task, task_id)
         if not task:
@@ -227,9 +268,45 @@ def rewrite_task(task_id: str, direction: str):
             _update(db, task, ai_status="rewriting", ai_message="Gemini 正在改编文案")
             result = rewrite_script(task.title, task.transcript_text or "", direction)
             _update(db, task, rewrite_text=result, ai_status="idle", ai_message="改编完成")
+            settle_ai_use(db, task.id, "rewrite", True)
         except Exception as exc:
             db.rollback()
             _update(db, task, ai_status="failed", ai_message=str(exc))
+            settle_ai_use(db, task.id, "rewrite", False)
+
+
+def summarize_task(task_id: str):
+    from .billing import settle_ai_use
+    with SessionLocal() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return
+        try:
+            _update(db, task, ai_status="summarizing", ai_message="正在总结视频文案")
+            result = summarize_transcript(task.title, task.transcript_text or "")
+            _update(db, task, summary_text=result, ai_status="idle", ai_message="文案总结完成")
+            settle_ai_use(db, task.id, "summary", True)
+        except Exception as exc:
+            db.rollback()
+            _update(db, task, ai_status="failed", ai_message=str(exc))
+            settle_ai_use(db, task.id, "summary", False)
+
+
+def translate_task(task_id: str, language: str):
+    from .billing import settle_ai_use
+    with SessionLocal() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return
+        try:
+            _update(db, task, ai_status="translating", ai_message=f"正在翻译为{language}")
+            result = translate_transcript(task.title, task.transcript_text or "", language)
+            _update(db, task, translated_text=result, translation_language=language, ai_status="idle", ai_message="文案翻译完成")
+            settle_ai_use(db, task.id, "translate", True)
+        except Exception as exc:
+            db.rollback()
+            _update(db, task, ai_status="failed", ai_message=str(exc))
+            settle_ai_use(db, task.id, "translate", False)
 
 
 def cleanup_expired_sources():
@@ -250,6 +327,9 @@ def cleanup_expired_sources():
             delete_source(task.media_path)
             shutil.rmtree(settings.data_dir / "tasks" / task.id, ignore_errors=True)
             task.media_path = None
+            task.source_playback_url = None
+            task.source_playback_audio_url = None
+            task.source_playback_kind = None
             task.updated_at = now
         db.commit()
 
@@ -263,6 +343,9 @@ def cleanup_source_task(task_id: str):
         delete_source(task.media_path)
         shutil.rmtree(settings.data_dir / "tasks" / task.id, ignore_errors=True)
         task.media_path = None
+        task.source_playback_url = None
+        task.source_playback_audio_url = None
+        task.source_playback_kind = None
         task.source_delete_at = None
         db.commit()
 
