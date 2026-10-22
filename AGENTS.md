@@ -2,6 +2,8 @@
 
 ## Project map
 
+- This repository owns the web transcription service. The separately built desktop batch downloader lives in `GaoSeafood/tingjian-desktop`; do not add Electron builds or desktop runtime data here. Keep the web service's existing download task type intact.
+
 - `frontend/`: React + Vite single-page application.
 - `backend/app/main.py`: FastAPI routes, authentication, task/history APIs, and static frontend serving.
 - `backend/app/jobs.py` and `backend/app/worker.py`: queued transcription, AI, cleanup, and download jobs.
