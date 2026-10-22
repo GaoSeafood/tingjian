@@ -10,3 +10,5 @@ yt-dlp==2026.8.19
 bcrypt==4.3.0
 itsdangerous==2.2.0
 cryptography==45.0.6
+playwright==1.63.0
+alipay-sdk-python==3.7.1397

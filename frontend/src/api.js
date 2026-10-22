@@ -43,9 +43,29 @@ export const api = {
   tasks: () => request('/api/tasks'),
   providerSettings: () => request('/api/settings/providers'),
   adminUsers: () => request('/api/admin/users'),
+  billing: () => request('/api/billing/me'),
+  plans: () => request('/api/billing/plans'),
+  billingOrders: () => request('/api/billing/orders'),
+  requestPlan: (plan_code) => request('/api/billing/orders', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_code }),
+  }),
+  cancelBillingOrder: (id) => request(`/api/billing/orders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  apiKeys: () => request('/api/account/api-keys'),
+  createApiKey: (name) => request('/api/account/api-keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  revokeApiKey: (id) => request(`/api/account/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  adminPlans: () => request('/api/admin/plans'),
+  adminBillingOrders: () => request('/api/admin/billing/orders'),
+  fulfillBillingOrder: (id) => request(`/api/admin/billing/orders/${encodeURIComponent(id)}/fulfill`, { method: 'POST' }),
+  savePlan: (code, plan) => request(`/api/admin/plans/${encodeURIComponent(code)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan),
+  }),
+  assignPlan: (userId, plan_code, days = 30) => request(`/api/admin/users/${userId}/plan`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_code, days }),
+  }),
   createUser: (username, password) => request('/api/admin/users', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
   }),
+  deleteUser: (id) => request('/api/admin/users/' + id, { method: 'DELETE' }),
   saveProviderSettings: (settings) => request('/api/settings/providers', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
   }),
@@ -56,6 +76,9 @@ export const api = {
     return request('/api/settings/douyin-cookies', { method: 'POST', body: form })
   },
   task: (id) => request(`/api/tasks/${id}`),
+  refreshPlayback: (id) => request(`/api/tasks/${id}/refresh-playback`, { method: 'POST' }),
+  preparePlaybackVideo: (id) => request(`/api/tasks/${id}/prepare-playback-video`, { method: 'POST' }),
+  retryTask: (id) => request(`/api/tasks/${id}/retry`, { method: 'POST' }),
   upload: (file, language = 'auto') => {
     const form = new FormData()
     form.append('video', file)
@@ -65,6 +88,9 @@ export const api = {
   url: (url) => request('/api/tasks/url', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
   }),
+  batch: (urls) => request('/api/tasks/batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls }),
+  }),
   download: (url) => request('/api/tasks/download', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
   }),
@@ -72,7 +98,12 @@ export const api = {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segments }),
   }),
   highlights: (id) => request(`/api/tasks/${id}/highlights`, { method: 'POST' }),
+  summarize: (id) => request(`/api/tasks/${id}/summary`, { method: 'POST' }),
+  translate: (id, language) => request(`/api/tasks/${id}/translate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }),
+  }),
   visualAnalysis: (id) => request(`/api/tasks/${id}/visual-analysis`, { method: 'POST' }),
+  refreshPlayback: (id) => request(`/api/tasks/${id}/refresh-playback`, { method: 'POST' }),
   rewrite: (id, direction) => request(`/api/tasks/${id}/rewrite`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ direction }),
   }),

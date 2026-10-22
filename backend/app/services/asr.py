@@ -20,6 +20,8 @@ class ASRClient:
     def transcribe(self, audio_path: Path) -> dict:
         if self.config["asr_provider"] == "mimo":
             return self._mimo(audio_path)
+        if self.config["asr_provider"] == "siliconflow":
+            return self._siliconflow(audio_path)
         if self.config["asr_provider"] == "assemblyai":
             return self._assemblyai(audio_path)
         if self.config["asr_provider"] == "tencent":
@@ -277,6 +279,28 @@ class ASRClient:
         if isinstance(content, list):
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
         return {"text": str(content).strip(), "segments": []}
+
+    def _siliconflow(self, audio_path: Path) -> dict:
+        """Call SiliconFlow's audio transcription endpoint."""
+        api_key = self.config.get("siliconflow_api_key") or ""
+        base_url = self.config.get("siliconflow_base_url") or "https://api.siliconflow.cn/v1"
+        if not api_key:
+            raise RuntimeError("尚未配置硅基流动 API Key")
+        with audio_path.open("rb") as handle:
+            response = requests.post(
+                f"{base_url.rstrip('/')}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (audio_path.name, handle, mimetypes.guess_type(audio_path.name)[0] or "audio/mpeg")},
+                data={"model": self.config.get("siliconflow_model") or "FunAudioLLM/SenseVoiceSmall"},
+                timeout=300,
+            )
+        if response.status_code != 200:
+            raise RuntimeError(f"硅基流动 ASR 请求失败 ({response.status_code}): {response.text[:400]}")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError(f"硅基流动 ASR 返回了无效响应：{response.text[:300]}") from exc
+        return {"text": str(payload.get("text") or "").strip(), "segments": []}
 
     def _openai_transcription(self, audio_path: Path) -> dict:
         if not self.config["custom_asr_base_url"] or not self.config["custom_asr_api_key"]:
