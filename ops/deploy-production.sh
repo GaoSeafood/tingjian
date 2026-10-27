@@ -13,7 +13,7 @@ die() {
   exit 2
 }
 
-for binary in stat find grep realpath; do
+for binary in stat find grep realpath python3; do
   command -v "$binary" >/dev/null 2>&1 || die "Missing command: $binary"
 done
 [[ -f "$CONFIG" && -r "$CONFIG" ]] || die "Missing readable $CONFIG"
@@ -33,6 +33,7 @@ source "$CONFIG"
 [[ "$TINGJIAN_COMPOSE_DIR" == /opt/1panel/apps/tingjian ]] || die "Unexpected 1Panel app directory"
 COMPOSE_DIR="$(realpath -e "$TINGJIAN_COMPOSE_DIR")"
 BASE_COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+STALE_GENERATED_COMPOSE_FILE=/var/cache/github-deploy/tingjian-compose.k6G0uoZ3.yaml
 [[ -f "$BASE_COMPOSE_FILE" ]] || die "Missing 1Panel Compose file: $BASE_COMPOSE_FILE"
 
 # Do not let inherited shell settings select a different Compose project or daemon.
@@ -57,6 +58,7 @@ STATE_DIR="$HOME/.local/state/tingjian-deploy"
 IMAGE_OVERRIDE="$STATE_DIR/release-image.yml"
 COMPOSE_COMMAND=()
 DISCOVERED_FILES=()
+IGNORED_GENERATED_FILES=0
 CURRENT_IMAGE=""
 
 inspect_label() {
@@ -81,6 +83,7 @@ get_all_service_ids() {
 
 discover_active_compose() {
   local ids_text container_id working_dir config_csv label_value service up_help
+  local generated_count=0
   local -a project_ids raw_files app_ids
   ids_text="$(docker ps -q --filter "label=com.docker.compose.project=$TINGJIAN_COMPOSE_PROJECT")"
   [[ -n "$ids_text" ]] || die "No running containers found in Compose project tingjian"
@@ -111,10 +114,17 @@ discover_active_compose() {
 
   IFS=',' read -r -a raw_files <<<"$config_csv"
   DISCOVERED_FILES=()
+  IGNORED_GENERATED_FILES=0
   for label_value in "${raw_files[@]}"; do
     [[ -n "$label_value" ]] || die "Empty path in Compose config_files label"
     [[ "$label_value" == "$IMAGE_OVERRIDE" ]] && continue
-    [[ "$label_value" == /* && -f "$label_value" && -r "$label_value" ]] || die "Missing or unreadable active Compose file: $label_value"
+    if [[ "$label_value" == "$STALE_GENERATED_COMPOSE_FILE" ]]; then
+      generated_count=$((generated_count + 1))
+      (( generated_count <= 1 )) || die "Multiple generated tingjian Compose labels found"
+      IGNORED_GENERATED_FILES=1
+      continue
+    fi
+    [[ "$label_value" == "$BASE_COMPOSE_FILE" && -r "$label_value" ]] || die "Unexpected active Compose file label: $label_value"
     DISCOVERED_FILES+=("$label_value")
   done
   [[ "${DISCOVERED_FILES[0]:-}" == "$BASE_COMPOSE_FILE" ]] || die "The active Compose file list does not start with $BASE_COMPOSE_FILE"
@@ -133,6 +143,124 @@ discover_active_compose() {
   up_help="$("${COMPOSE_COMMAND[@]}" up --help)"
   grep -q -- '--no-build' <<<"$up_help" || die "Installed Docker Compose does not support --no-build"
   grep -q -- '--pull' <<<"$up_help" || die "Installed Docker Compose does not support --pull"
+}
+
+validate_live_compose() {
+  python3 - "$TINGJIAN_COMPOSE_PROJECT" "$COMPOSE_DIR" "$BASE_COMPOSE_FILE" <<'PY'
+import json
+import subprocess
+import sys
+
+project, compose_dir, compose_file = sys.argv[1:]
+
+def run(args):
+    result = subprocess.run(args, text=True, capture_output=True)
+    if result.returncode:
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+        raise SystemExit(2)
+    return result.stdout
+
+model = json.loads(run([
+    "docker", "compose", "--project-name", project,
+    "--project-directory", compose_dir, "-f", compose_file,
+    "config", "--format", "json",
+]))
+services = ("web", "worker", "worker-ai", "db", "redis")
+if not set(services).issubset(model.get("services", {})):
+    raise SystemExit("Stable Compose config does not define all expected services")
+network_defs = model.get("networks") or {}
+volume_defs = model.get("volumes") or {}
+
+def mounts(rows, runtime=False):
+    normalized = []
+    for row in rows or []:
+        if runtime:
+            kind = row.get("Type", "").lower()
+            source = row.get("Source", "") if kind == "bind" else row.get("Name", "")
+            target = row.get("Destination", "")
+            read_only = not row.get("RW", True)
+        else:
+            kind = row.get("type", "volume")
+            source = row.get("source") or ""
+            if kind == "volume" and source:
+                definition = volume_defs.get(source) or {}
+                if definition.get("external"):
+                    source = definition.get("name") or source
+                else:
+                    source = definition.get("name") or f"{project}_{source}"
+            target = row.get("target", "")
+            read_only = bool(row.get("read_only", False))
+        normalized.append((kind, str(source), str(target), bool(read_only)))
+    return sorted(normalized)
+
+def ports(service, host_config):
+    expected = []
+    for row in service.get("ports") or []:
+        published = row.get("published")
+        if published in (None, ""):
+            raise SystemExit("Stable Compose config has a dynamic port; review before deployment")
+        expected.append((str(row["target"]), str(row.get("protocol") or "tcp"),
+                         str(row.get("host_ip") or "0.0.0.0"), str(published)))
+    actual = []
+    for container_port, bindings in (host_config.get("PortBindings") or {}).items():
+        target, protocol = container_port.split("/", 1)
+        for binding in bindings or []:
+            actual.append((target, protocol, str(binding.get("HostIp") or "0.0.0.0"),
+                           str(binding.get("HostPort") or "")))
+    return sorted(expected), sorted(actual)
+
+def networks(service):
+    configured = service.get("networks") or {"default": None}
+    names = []
+    for name, options in configured.items():
+        definition = network_defs.get(name) or {}
+        if definition.get("external"):
+            names.append(str(definition.get("name") or name))
+        else:
+            names.append(str(definition.get("name") or f"{project}_{name}"))
+    return sorted(names)
+
+for service_name in services:
+    service = model["services"][service_name]
+    ids = run([
+        "docker", "ps", "-q",
+        "--filter", f"label=com.docker.compose.project={project}",
+        "--filter", f"label=com.docker.compose.service={service_name}",
+    ]).split()
+    if not ids:
+        raise SystemExit(f"No running container found for {service_name}")
+    for container_id in ids:
+        container = json.loads(run(["docker", "inspect", container_id]))[0]
+        if mounts(service.get("volumes")) != mounts(container.get("Mounts"), True):
+            raise SystemExit(f"Stable Compose mounts differ from running {service_name}")
+        expected_ports, actual_ports = ports(service, container.get("HostConfig") or {})
+        if expected_ports != actual_ports:
+            raise SystemExit(f"Stable Compose port bindings differ from running {service_name}")
+        live_networks = sorted((container.get("NetworkSettings", {}).get("Networks") or {}).keys())
+        if networks(service) != live_networks:
+            raise SystemExit(f"Stable Compose networks differ from running {service_name}")
+
+        actual_env = dict(item.split("=", 1) for item in (container.get("Config", {}).get("Env") or []) if "=" in item)
+        for key, value in (service.get("environment") or {}).items():
+            key = str(key)
+            if value is None:
+                if key not in actual_env:
+                    raise SystemExit(f"Stable Compose environment key is missing from running {service_name}")
+            elif actual_env.get(key) != str(value):
+                raise SystemExit(f"Stable Compose environment differs from running {service_name}")
+
+        for field, container_field in (("command", "Cmd"), ("entrypoint", "Entrypoint")):
+            expected = service.get(field)
+            if expected is not None and expected != container.get("Config", {}).get(container_field):
+                raise SystemExit(f"Stable Compose {field} differs from running {service_name}")
+        expected_restart = str(service.get("restart") or "no")
+        actual_restart = str((container.get("HostConfig", {}).get("RestartPolicy") or {}).get("Name") or "no")
+        if expected_restart != actual_restart:
+            raise SystemExit(f"Stable Compose restart policy differs from running {service_name}")
+
+print("Stable Compose mounts, ports, networks, commands, restart policies, and explicit environment match running containers")
+PY
 }
 
 capture_current_runtime() {
@@ -182,7 +310,8 @@ capture_current_runtime() {
 readonly_preflight() {
   discover_active_compose
   capture_current_runtime
-  echo "Read-only preflight OK: project=tingjian app_image=$CURRENT_IMAGE active_compose_files=${#DISCOVERED_FILES[@]}"
+  validate_live_compose
+  echo "Read-only preflight OK: project=tingjian app_image=$CURRENT_IMAGE stable_compose_files=${#DISCOVERED_FILES[@]} ignored_generated_labels=$IGNORED_GENERATED_FILES"
 }
 
 if [[ "$mode" == check ]]; then
@@ -190,14 +319,14 @@ if [[ "$mode" == check ]]; then
   exit 0
 fi
 
-for binary in flock install mktemp tar gzip cat sleep; do
+for binary in flock install mktemp tar gzip cat sleep python3; do
   command -v "$binary" >/dev/null 2>&1 || die "Missing command: $binary"
 done
 install -d -m 0700 -- "$STATE_DIR"
 exec 9>"$STATE_DIR/deploy.lock"
 flock -w 300 9 || die "Another tingjian deployment holds the lock"
 
-# Re-read active labels after acquiring the lock to avoid racing a 1Panel update.
+# Re-read runtime metadata after acquiring the lock; the preflight repeats after build.
 readonly_preflight
 PREVIOUS_IMAGE="$CURRENT_IMAGE"
 TARGET_IMAGE="$TINGJIAN_IMAGE_REPOSITORY:$target"

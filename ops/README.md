@@ -7,34 +7,31 @@
 截至 2026-10-27，VPS 提供的只读信息显示：
 
 * Compose 项目名为 `tingjian`，工作目录为 `/opt/1panel/apps/tingjian`。
-* 活动配置由 `/opt/1panel/apps/tingjian/docker-compose.yml` 与一个位于 `/var/cache/github-deploy/` 的生成配置共同组成。容器标签报告的文件名是临时名；部署命令会从**正在运行的应用容器标签**读取真实文件列表，每次部署前重新核对文件仍存在。
+* 运行中容器标签仍引用 `/var/cache/github-deploy/tingjian-compose.k6G0uoZ3.yaml`，但该文件目前已不存在。
 * 活动应用镜像使用 `localhost/github-deploy/tingjian:<完整提交 SHA>`。
 * `/opt/1panel/apps/tingjian` 不是 Git 工作区。
 
-因此服务器上不需要也不应该在该目录创建 Git checkout。部署不改生产目录下的 `.env`、Compose 文件或持久卷。
+只读核查确认稳定配置 `/opt/1panel/apps/tingjian/docker-compose.yml` 单独可解析；它定义的服务、应用/数据库/Redis 挂载、Web 端口、网络、环境和命令与运行中容器一致。因此部署以这份稳定配置为准，识别并忽略容器标签里残留的那条临时文件路径。服务器上不需要创建 Git checkout。部署不编辑生产目录下的 `.env` 或 Compose 文件，也不删除或改接现有数据挂载。
 
 ## 合并前的最小只读核查
 
-以下命令只读取容器元数据与 Compose 配置；不会拉取镜像、写文件或重启容器。先确认 `GENERATED` 与 `docker inspect` 报告的当前路径一致：
+以下命令只读取容器元数据与稳定 Compose 配置；不会拉取镜像、写文件或重启容器：
 
 ```bash
 BASE=/opt/1panel/apps/tingjian/docker-compose.yml
-GENERATED=/var/cache/github-deploy/tingjian-compose.k6G0uoZ3.yaml
 
 docker compose version
 docker compose up --help | grep -E -- '--no-build|--pull'
 docker inspect tingjian-web-1 --format 'project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} workdir={{index .Config.Labels "com.docker.compose.project.working_dir"}} files={{index .Config.Labels "com.docker.compose.project.config_files"}} image={{.Config.Image}} state={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
-test -r "$BASE" && test -r "$GENERATED"
-docker compose -p tingjian -f "$BASE" -f "$GENERATED" config --quiet
-docker compose -p tingjian -f "$BASE" -f "$GENERATED" config --services
-docker compose -p tingjian -f "$BASE" -f "$GENERATED" config --images
+docker compose -p tingjian -f "$BASE" config --quiet
+docker compose -p tingjian -f "$BASE" config --services
 
 for name in tingjian-web-1 tingjian-worker-1 tingjian-worker-ai-1 tingjian-db-1 tingjian-redis-1; do
-  docker inspect "$name" --format '{{.Name}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}} state={{.State.Status}} mounts={{range .Mounts}}{{.Type}}:{{.Name}}->{{.Destination}};{{end}}'
+  docker inspect "$name" --format '{{.Name}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}} state={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} ports={{json .HostConfig.PortBindings}} networks={{range $name, $network := .NetworkSettings.Networks}}{{$name}};{{end}} mounts={{range .Mounts}}{{.Type}}:{{.Source}}->{{.Destination}};{{end}}'
 done
 ```
 
-The output must show Compose supports `--no-build` and `--pull`, confirm all five service names exist, show the running app containers share the expected SHA-tagged local image, show PostgreSQL and Redis are healthy, and show volume mount names and destinations matching the current installation. Do not paste `.env` contents or the full rendered Compose configuration into chat. If the generated file name, services, mounts, health, project name, or image format differ, stop and revise the deployment settings before enabling the workflow.
+The output must show Compose supports `--no-build` and `--pull`, confirm all five service names exist, show the running app containers share the expected SHA-tagged local image, show PostgreSQL and Redis are healthy, and show the stable config's mounts, Web port, and network match the live containers. The wrapper compares explicitly configured environment values in memory without printing them; it leaves values supplied through `.env` out of its output. Do not paste `.env` contents or the full rendered Compose configuration into chat. Stop and revise deployment settings if these checks differ.
 
 ## Deployment behavior
 
@@ -42,7 +39,7 @@ The output must show Compose supports `--no-build` and `--pull`, confirm all fiv
 2. GitHub Actions verifies the required secrets and uses strict SSH host-key checking. The host key must be checked against a fingerprint obtained independently from the VPS console.
 3. Actions sends a gzip-compressed Git archive for the exact commit SHA to the restricted SSH command. It does not require Git or a GitHub credential on the VPS.
 4. The forced command accepts only `check` or `deploy <40-character SHA>`. `check` is read-only. Deployment stages source under the deploy account's private state directory and builds `localhost/github-deploy/tingjian:<SHA>` there, outside `/opt/1panel/apps/tingjian`.
-5. The deploy command reads the active Compose file list from the running `web`, `worker`, and `worker-ai` container labels. It confirms they agree, retains the 1Panel generated config, and rechecks the image and file list after the build before appending a small image override for those three application services.
+5. The deploy command reads the app container labels, uses the stable `/opt/1panel/apps/tingjian/docker-compose.yml`, and ignores only the known stale `/var/cache/github-deploy/tingjian-compose.k6G0uoZ3.yaml` label. Before and after the build it checks that the stable config's mounts, ports, networks, explicitly configured environment values, commands, and restart policies match the running containers. It then appends an image override for the three application services.
 6. It updates only `web`, `worker`, and `worker-ai` with `--no-deps --no-build --pull never`. It does not run `down`, prune images, update PostgreSQL or Redis, or remove volumes. The web health check and running worker states must pass within four minutes.
 7. If application startup or the health check fails after the update begins, the script attempts to restore the previously running local image for those three services. This cannot undo database migrations or guarantee zero task interruption; retain a separate database backup before an application release that changes the schema.
 
@@ -87,7 +84,7 @@ Limit the Environment deployment branch to `main`. Add required reviewers if the
 
 ## Cutover
 
-1. Complete the read-only VPS checks and confirm the server's generated Compose file remains available.
+1. Complete the read-only VPS checks and confirm the stable Compose configuration still matches the live containers.
 2. Install the forced-command wrapper, run `check`, validate the VPS host key, and configure the Environment.
 3. Review the CI run for the draft PR. Keep the PR unmerged until all settings are ready; merging activates the new `main` deployment job.
 4. On the first successful deployment, verify the web health, both workers, database, Redis, and a real user-facing workflow. Then disable only the old `tingjian` webhook route if it is still enabled. Do not change shared deployment routes for other projects.
