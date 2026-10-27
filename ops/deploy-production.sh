@@ -203,6 +203,7 @@ if [[ "$PREVIOUS_IMAGE" == "$TARGET_IMAGE" ]]; then
   echo "tingjian already runs commit $target; no production changes made"
   exit 0
 fi
+PREVIOUS_COMPOSE_FILES="${DISCOVERED_FILES[*]}"
 stage_dir="$(mktemp -d "$STATE_DIR/source.XXXXXX")"
 deployment_started=0
 
@@ -283,6 +284,10 @@ docker build \
   "$stage_dir"
 built_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$TARGET_IMAGE")"
 [[ "$built_revision" == "$target" ]] || die "Built image revision label does not match requested SHA"
+
+readonly_preflight
+[[ "$CURRENT_IMAGE" == "$PREVIOUS_IMAGE" ]] || die "The running app image changed during the build; refusing to update production"
+[[ "${DISCOVERED_FILES[*]}" == "$PREVIOUS_COMPOSE_FILES" ]] || die "The active Compose files changed during the build; refusing to update production"
 
 write_image_override "$TARGET_IMAGE"
 RELEASE_COMPOSE=("${COMPOSE_COMMAND[@]}" -f "$IMAGE_OVERRIDE")
