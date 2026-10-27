@@ -22,6 +22,7 @@ BASE=/opt/1panel/apps/tingjian/docker-compose.yml
 GENERATED=/var/cache/github-deploy/tingjian-compose.k6G0uoZ3.yaml
 
 docker compose version
+docker compose up --help | grep -E -- '--no-build|--pull'
 docker inspect tingjian-web-1 --format 'project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} workdir={{index .Config.Labels "com.docker.compose.project.working_dir"}} files={{index .Config.Labels "com.docker.compose.project.config_files"}} image={{.Config.Image}} state={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
 test -r "$BASE" && test -r "$GENERATED"
 docker compose -p tingjian -f "$BASE" -f "$GENERATED" config --quiet
@@ -33,7 +34,7 @@ for name in tingjian-web-1 tingjian-worker-1 tingjian-worker-ai-1 tingjian-db-1 
 done
 ```
 
-The output must confirm that all five service names exist, the running app containers share the expected SHA-tagged local image, PostgreSQL and Redis are healthy, and their volume mount names and destinations match the current installation. Do not paste `.env` contents or the full rendered Compose configuration into chat. If the generated file name, services, mounts, health, project name, or image format differ, stop and revise the deployment settings before enabling the workflow.
+The output must show Compose supports `--no-build` and `--pull`, confirm all five service names exist, show the running app containers share the expected SHA-tagged local image, show PostgreSQL and Redis are healthy, and show volume mount names and destinations matching the current installation. Do not paste `.env` contents or the full rendered Compose configuration into chat. If the generated file name, services, mounts, health, project name, or image format differ, stop and revise the deployment settings before enabling the workflow.
 
 ## Deployment behavior
 

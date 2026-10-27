@@ -80,7 +80,7 @@ get_all_service_ids() {
 }
 
 discover_active_compose() {
-  local ids_text container_id working_dir config_csv label_value service
+  local ids_text container_id working_dir config_csv label_value service up_help
   local -a project_ids raw_files app_ids
   ids_text="$(docker ps -q --filter "label=com.docker.compose.project=$TINGJIAN_COMPOSE_PROJECT")"
   [[ -n "$ids_text" ]] || die "No running containers found in Compose project tingjian"
@@ -130,6 +130,9 @@ discover_active_compose() {
   for label_value in web worker worker-ai db redis; do
     grep -Fxq "$label_value" <<<"$services" || die "Active Compose config is missing service $label_value"
   done
+  up_help="$("${COMPOSE_COMMAND[@]}" up --help)"
+  grep -q -- '--no-build' <<<"$up_help" || die "Installed Docker Compose does not support --no-build"
+  grep -q -- '--pull' <<<"$up_help" || die "Installed Docker Compose does not support --pull"
 }
 
 capture_current_runtime() {
