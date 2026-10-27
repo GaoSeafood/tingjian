@@ -129,7 +129,7 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
       <button className={page === 'home' || page === 'detail' ? 'active' : ''} onClick={() => setPage('home')}>{tr(lang, 'workspace')}</button>
       <button className={page === 'history' ? 'active' : ''} onClick={() => setPage('history')}>{tr(lang, 'history')}</button>
       <button className={page === 'membership' ? 'active' : ''} onClick={() => setPage('membership')}>{tr(lang, 'membership')}</button>
-      {panelMode && user?.role === 'admin' && <button className={page === 'admin' ? 'active' : ''} onClick={() => setPage('admin')}>{lang === 'en' ? 'Admin' : '管理后台'}</button>}
+      {user?.role === 'admin' && <button className={page === 'admin' ? 'active' : ''} onClick={() => setPage('admin')}>{lang === 'en' ? 'Admin' : '管理后台'}</button>}
     </nav>
     <div className="account">
       <div className="theme-menu" ref={themeRef}>
@@ -156,7 +156,7 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
           <div className="account-identity"><b>{user?.username}</b><span>{user?.role === 'admin' ? tr(lang, 'admin') : tr(lang, 'member')}</span></div>
           <div className="account-usage"><strong>{tr(lang, 'transcriptionQuota')}</strong><div><span>{tr(lang, 'remaining')}</span><b>{quotaUnlimited ? tr(lang, 'unlimited') : quotaRemaining == null ? '—' : `${quotaRemaining} ${lang === 'en' ? 'min' : '分钟'}`}</b></div>{!quotaUnlimited && <div className="account-progress"><i style={{width: `${quotaProgress}%`}}/></div>}<small>{billing ? `${billing.plan.name} · ${billing.plan.monthly_minutes < 0 ? tr(lang, 'unlimited') : `${billing.used_minutes} / ${billing.plan.monthly_minutes} ${lang === 'en' ? 'min' : '分钟'}`}` : (lang === 'en' ? 'Loading usage…' : '正在读取用量…')}</small></div>
           <p className="account-note">{tr(lang, 'accountNote')}</p>
-          {panelMode && user?.role === 'admin' && <button className="account-action account-action-accent" onClick={() => openPage('admin')}><SlidersHorizontal size={18}/>{lang === 'en' ? 'Admin console' : '管理后台'}</button>}
+          {user?.role === 'admin' && <button className="account-action account-action-accent" onClick={() => openPage('admin')}><SlidersHorizontal size={18}/>{lang === 'en' ? 'Admin console' : '管理后台'}</button>}
           <button className="account-action account-action-accent" onClick={() => openPage('benefits')}><UserRound size={18}/>{tr(lang, 'accountBenefits')}</button>
           {billing?.plan?.code?.startsWith('ultra_') && <button className="account-action" onClick={() => openPage('api-keys')}><KeyRound size={18}/>API Key</button>}
           <button className="account-action" onClick={() => openPage('settings')}><UserRound size={18}/>{tr(lang, 'accountSettings')}</button>
@@ -1076,8 +1076,13 @@ function SettingsPage({ onBack, user, adminView = false }) {
 
 function App() {
   const [user, setUser] = useState(undefined)
-  const panelMode = ['panel.tingjian.gaoseafood.com', '100.78.228.11', 'localhost', '127.0.0.1'].includes(window.location.hostname)
-  const [page, setPage] = useState(() => ['panel.tingjian.gaoseafood.com', '100.78.228.11'].includes(window.location.hostname) ? 'admin' : 'home')
+  const [page, setPageState] = useState(() => window.location.pathname.replace(/\/$/, '') === '/admin' ? 'admin' : 'home')
+  const setPage = nextPage => {
+    setPageState(nextPage)
+    const isAdminPath = window.location.pathname.replace(/\/$/, '') === '/admin'
+    if (nextPage === 'admin' && !isAdminPath) window.history.pushState({}, '', `/admin${window.location.search}${window.location.hash}`)
+    else if (nextPage !== 'admin' && isAdminPath) window.history.pushState({}, '', `/${window.location.search}${window.location.hash}`)
+  }
   const [lang, setLang] = useState(() => window.localStorage.getItem('tingjian-language') === 'en' ? 'en' : 'zh')
   const [theme, setTheme] = useState(() => ['light', 'dark'].includes(window.localStorage.getItem('tingjian-theme')) ? window.localStorage.getItem('tingjian-theme') : 'system')
   const [tasks, setTasks] = useState([])
@@ -1097,6 +1102,11 @@ function App() {
     media.addEventListener?.('change', apply)
     return () => media.removeEventListener?.('change', apply)
   }, [theme])
+  useEffect(() => {
+    const syncPage = () => setPageState(window.location.pathname.replace(/\/$/, '') === '/admin' ? 'admin' : 'home')
+    window.addEventListener('popstate', syncPage)
+    return () => window.removeEventListener('popstate', syncPage)
+  }, [])
   const removeTask = useCallback(async (taskId) => {
     await api.deleteTask(taskId)
     setTasks(current => current.filter(task => task.id !== taskId))
@@ -1129,15 +1139,15 @@ function App() {
   if (user === undefined) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
   if (!user) return <Login lang={lang} onLanguageChange={changeLanguage} onLogin={async me => { setUser(me); await refresh() }}/>
   const open = id => { setSelected(id); setPage('detail') }
-  return <div className="app"><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { await api.logout(); setUser(null) }} panelMode={panelMode}/>
+  return <div className="app"><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { await api.logout(); setUser(null) }}/>
     {page === 'home' && <Home tasks={tasks} refresh={refresh} onOpen={open} lang={lang}/>}
     {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>{lang === 'en' ? 'History' : '历史记录'}</h1><p>{lang === 'en' ? 'Your transcripts, AI analysis, and download tasks are saved here.' : '你的听写稿、AI 分析和下载任务都保存在这里。'}</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full lang={lang}/></main>}
     {page === 'membership' && <MembershipPage lang={lang} onBack={() => setPage('home')}/>}
     {page === 'benefits' && <BenefitsPage lang={lang} onBack={() => setPage('home')} onUpgrade={() => setPage('membership')}/>}
     {page === 'api-keys' && <APIKeysPage lang={lang} onBack={() => setPage('home')}/>}
     {page === 'settings' && <SettingsPage user={user} onBack={() => setPage('home')}/>}
-    {page === 'admin' && panelMode && user.role === 'admin' && <SettingsPage user={user} adminView onBack={() => setPage('home')}/>}
-    {page === 'admin' && (!panelMode || user.role !== 'admin') && <main className="shell access-denied"><LockKeyhole size={26}/><h1>此页面仅管理员可访问</h1><p>请从 Tailscale 管理域名使用管理员账号登录。</p><button className="outline" onClick={() => setPage('home')}>返回工作台</button></main>}
+    {page === 'admin' && user.role === 'admin' && <SettingsPage user={user} adminView onBack={() => setPage('home')}/>}
+    {page === 'admin' && user.role !== 'admin' && <main className="shell access-denied"><LockKeyhole size={26}/><h1>此页面仅管理员可访问</h1><p>请使用管理员账号登录。</p><button className="outline" onClick={() => setPage('home')}>返回工作台</button></main>}
     {page === 'detail' && selected && (
       <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} refresh={refresh} onOpen={open}/>
     )}

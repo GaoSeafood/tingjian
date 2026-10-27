@@ -255,14 +255,9 @@ def owned_transcription_task(task_id: str, user: User, db: Session) -> Task:
     return task
 
 
-def admin_only(request: Request, user: User = Depends(current_user)) -> User:
+def admin_only(user: User = Depends(current_user)) -> User:
     if user.role != "admin":
         raise HTTPException(403, "仅管理员可以执行此操作")
-    # Keep administrator operations on the dedicated panel hostname. Local
-    # development remains usable; production DNS points this name at Tailscale.
-    hostname = (request.url.hostname or "").lower()
-    if hostname not in {"panel.tingjian.gaoseafood.com", "100.78.228.11", "localhost", "127.0.0.1", "testserver"}:
-        raise HTTPException(404, "管理入口不存在")
     return user
 
 
@@ -1205,4 +1200,8 @@ def _srt(seconds: float) -> str:
 
 static_dir = Path(__file__).resolve().parents[2] / "static"
 if static_dir.exists():
+    @app.get("/admin")
+    def admin_frontend():
+        return FileResponse(static_dir / "index.html")
+
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
