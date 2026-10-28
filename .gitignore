@@ -11,3 +11,13 @@ frontend/dist/
 data/
 /output/
 *.log
+
+# Local credentials and environment overrides
+*.pem
+*.key
+id_rsa
+id_ed25519
+credentials*.json
+secrets/
+cookies*.txt
+cookies*.json
