@@ -4,6 +4,7 @@ import {
   History, Link2, LoaderCircle, LockKeyhole, LogOut, PencilLine,
   Play, RotateCcw, Search, Sparkles, Trash2, Upload, UserRound, Volume2, WandSparkles, X,
   SlidersHorizontal, Save, Languages, ChevronDown, KeyRound, Layers3, Sun, Moon, Monitor,
+  LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards,
 } from 'lucide-react'
 import { api } from './api'
 
@@ -123,7 +124,7 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
   const quotaUnlimited = billing?.unlimited || quotaTotal < 0
   const quotaRemaining = billing?.remaining_minutes
   const quotaProgress = quotaUnlimited || !quotaTotal ? 0 : Math.min(100, Math.max(0, billing.used_minutes / quotaTotal * 100))
-  return <header className="header">
+  return <header className={`header ${page === 'admin' ? 'admin-header' : ''}`}>
     <Logo />
     <nav>
       <button className={page === 'home' || page === 'detail' ? 'active' : ''} onClick={() => setPage('home')}>{tr(lang, 'workspace')}</button>
@@ -902,6 +903,7 @@ function APIKeysPage({ lang, onBack }) {
 }
 
 function SettingsPage({ onBack, user, adminView = false }) {
+  const [adminSection, setAdminSection] = useState('overview')
   const [form, setForm] = useState(null)
   const [users, setUsers] = useState([])
   const [plans, setPlans] = useState([])
@@ -987,13 +989,35 @@ function SettingsPage({ onBack, user, adminView = false }) {
     try { setDouyinCookies(await api.uploadDouyinCookies(file)); setMessage('抖音 Cookie 已安全保存，新的抖音链接任务会自动使用。') }
     catch (err) { setError(err.message) } finally { setCookieBusy(false) }
   }
+  const adminNav = [
+    ['overview', LayoutDashboard, '数据概览'], ['users', Users, '用户管理'],
+    ['billing', WalletCards, '订单与套餐'], ['providers', Bot, 'AI 服务'],
+    ['system', Settings, '系统设置'],
+  ]
   if (!form) return <main className="loading-page"><LoaderCircle className="spin"/>{adminView ? '加载管理后台' : '加载账户设置'}</main>
   return <main className="settings-page shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>{adminView ? '返回工作台' : '返回'}</button>
-    <div className="settings-heading"><SlidersHorizontal/><div><h1>{adminView ? '管理后台' : '账户设置'}</h1><p>{adminView ? '集中配置听写模型、API、用户账号和商业套餐。' : '修改登录密码；接口设置仅管理员可管理。'}</p></div></div>
-    {adminView && <nav className="admin-shortcuts" aria-label="管理后台导航"><button type="button" onClick={() => document.getElementById('admin-api-asr')?.scrollIntoView({behavior:'smooth',block:'start'})}><KeyRound size={16}/>API 配置</button><button type="button" onClick={() => document.getElementById('admin-plans')?.scrollIntoView({behavior:'smooth',block:'start'})}>商业套餐</button><button type="button" onClick={() => document.getElementById('admin-billing-orders')?.scrollIntoView({behavior:'smooth',block:'start'})}>开通申请</button><button type="button" onClick={() => document.getElementById('admin-users')?.scrollIntoView({behavior:'smooth',block:'start'})}>用户管理</button><button type="button" onClick={() => document.getElementById('admin-douyin')?.scrollIntoView({behavior:'smooth',block:'start'})}>媒体服务</button></nav>}
+    <div className="settings-heading"><SlidersHorizontal/><div><h1>{adminView ? '听见管理中心' : '账户设置'}</h1><p>{adminView ? '管理账号、会员申请与听写服务配置。' : '修改登录密码；接口设置仅管理员可管理。'}</p></div></div>
+    {adminView && <div className="admin-console">
+      <aside className="admin-sidebar" aria-label="管理后台导航">
+        <span className="admin-sidebar-label">管理中心</span>
+        {adminNav.map(([id, Icon, label]) => <button type="button" key={id} className={adminSection === id ? 'active' : ''} onClick={() => setAdminSection(id)}><Icon size={17}/>{label}{id === 'billing' && billingOrders.length > 0 && <i>{billingOrders.length}</i>}</button>)}
+        <div className="admin-sidebar-foot"><Activity size={15}/><span>管理数据已载入</span></div>
+      </aside>
+      <div className="admin-content">
+        <div className="admin-page-title"><div><span>听见 · 管理中心</span><h2>{adminNav.find(([id]) => id === adminSection)?.[2]}</h2></div><small>{user?.username} · 管理员</small></div>
+        {adminSection === 'overview' && <section className="admin-overview">
+          <div className="admin-stat-grid">
+            <article><span><Users size={18}/></span><small>用户账号</small><strong>{users.length}</strong><em>含管理员账号</em></article>
+            <article><span><ReceiptText size={18}/></span><small>待处理开通申请</small><strong>{billingOrders.length}</strong><em>需确认收款后开通</em></article>
+            <article><span><WalletCards size={18}/></span><small>可管理套餐</small><strong>{plans.filter(plan => !['admin','legacy'].includes(plan.code)).length}</strong><em>{plans.filter(plan => plan.is_active).length} 个套餐当前开放</em></article>
+            <article><span><Bot size={18}/></span><small>语音服务</small><strong>{form.asr_provider === 'mimo' ? 'MiMo' : form.asr_provider === 'siliconflow' ? '硅基流动' : form.asr_provider === 'assemblyai' ? 'AssemblyAI' : form.asr_provider === 'tencent' ? '腾讯云' : '自定义'}</strong><em>当前新任务使用的 ASR</em></article>
+          </div>
+          <section className="admin-overview-panel"><div><h3>待办事项</h3><p>检查会员开通申请，并确认听写与文案服务配置。</p></div><button type="button" className="outline compact" onClick={() => setAdminSection('billing')}>查看 {billingOrders.length} 条申请<ChevronRight size={15}/></button></section>
+          <section className="admin-overview-panel"><div><h3>管理范围</h3><p>当前后台提供用户、套餐、会员申请和服务凭据配置。收入流水、AI Token 成本及任务队列尚未接入统计。</p></div><span className="admin-scope-tag">按现有数据展示</span></section>
+        </section>}
     <form className="settings-form" onSubmit={adminView && user?.role === 'admin' ? save : event => event.preventDefault()}>
-      {adminView && user?.role === 'admin' && <><section id="admin-api-asr"><div className="settings-section-title"><h2>语音听写 API</h2><p>ASR 密钥只由管理员维护，朋友无法查看。</p></div>
+      {adminView && user?.role === 'admin' && <><section id="admin-api-asr" hidden={adminSection !== 'providers'}><div className="settings-section-title"><h2>语音听写 API</h2><p>ASR 密钥只由管理员维护，朋友无法查看。</p></div>
         <div className="field-grid">
           <label>ASR 服务<select value={form.asr_provider} onChange={e => set('asr_provider', e.target.value)}><option value="mimo">小米 MiMo</option><option value="siliconflow">硅基流动</option><option value="tencent">腾讯云 ASR（说话人标记）</option><option value="assemblyai">AssemblyAI（说话人标记）</option><option value="custom">自定义 Whisper 兼容接口</option></select></label>
           <label>识别语言<select value={form.asr_language} onChange={e => set('asr_language', e.target.value)}><option value="auto">自动识别</option><option value="zh">中文</option><option value="en">英文</option></select></label>
@@ -1023,7 +1047,7 @@ function SettingsPage({ onBack, user, adminView = false }) {
           </>}
         </div>
       </section>
-      <section id="admin-api-copy"><div className="settings-section-title"><h2>文案 AI</h2><p>只在用户点击找亮点或复刻改编时调用 Sub2API。</p></div>
+      <section id="admin-api-copy" hidden={adminSection !== 'providers'}><div className="settings-section-title"><h2>文案 AI</h2><p>只在用户点击找亮点或复刻改编时调用 Sub2API。</p></div>
         <div className="field-grid">
           <label className="wide">Sub2API Base URL<input value={form.sub2api_base_url} onChange={e => set('sub2api_base_url', e.target.value)} placeholder="http://100.x.x.x:18081/v1"/></label>
           <label>Sub2API API Key<input type="password" value={form.sub2api_api_key || ''} onChange={e => set('sub2api_api_key', e.target.value)} placeholder={form.sub2api_api_key_configured ? '已配置，留空保持不变' : '请输入专用 API Key'}/></label>
@@ -1032,11 +1056,11 @@ function SettingsPage({ onBack, user, adminView = false }) {
           <label className="wide">备用 Sub2API API Key（可选）<input type="password" value={form.sub2api_fallback_api_key || ''} onChange={e => set('sub2api_fallback_api_key', e.target.value)} placeholder={form.sub2api_fallback_api_key_configured ? '已配置，留空保持不变' : 'GPT 若属于其他分组，请填写绑定 OpenAI 分组的 Key'}/></label>
         </div>
       </section>
-      <section id="admin-douyin"><div className="settings-section-title"><h2>抖音下载</h2><p>建议使用小号。可用新版 Chrome 扩展同步 Cookie 与浏览器标识，也可上传 Cookie 文件；不保存账号密码。</p></div>
+      <section id="admin-douyin" hidden={adminSection !== 'system'}><div className="settings-section-title"><h2>抖音下载</h2><p>建议使用小号。可用新版 Chrome 扩展同步 Cookie 与浏览器标识，也可上传 Cookie 文件；不保存账号密码。</p></div>
         <div className="cookie-settings"><div><b>{douyinCookies?.configured ? '已配置抖音 Cookie' : '尚未配置抖音 Cookie'}</b><small>{douyinCookies?.configured ? `更新时间：${new Date(douyinCookies.updated_at).toLocaleString()}${douyinCookies.user_agent_configured ? ' · Chrome 标识已同步' : ' · 请更新扩展同步浏览器标识'}` : '抖音链接可能会提示需要新鲜 Cookie'}</small></div><label className="outline cookie-upload"><Upload size={17}/>选择 Cookie 文件<input type="file" accept=".txt,.cookies,text/plain" onChange={uploadCookies} disabled={cookieBusy}/></label></div>
         <p className="settings-note">在同一 Chrome 配置中登录抖音和听见管理后台，然后安装新版“听见抖音 Cookie 同步”扩展，从已登录的抖音页面主动同步。也可上传 Netscape 格式 Cookie 文件。</p>
       </section>
-      <section id="admin-plans"><div className="settings-section-title"><h2>商业套餐</h2><p>按月统计听写分钟数；当前在线支付尚未接入，用户提交申请后由管理员确认收款并开通。</p></div>
+      <section id="admin-plans" hidden={adminSection !== 'billing'}><div className="settings-section-title"><h2>商业套餐</h2><p>按月统计听写分钟数；当前在线支付尚未接入，用户提交申请后由管理员确认收款并开通。</p></div>
         <div className="billing-plan-list">{plans.filter(plan => !['admin','legacy'].includes(plan.code)).map(plan => <div className="billing-plan-editor" key={plan.code}>
           <div className="billing-plan-top"><b>{plan.name}</b><code>{plan.code}</code><label><input type="checkbox" checked={plan.is_active} onChange={event => updatePlan(plan.code,'is_active',event.target.checked)}/>对用户开放</label></div>
           <div className="billing-plan-fields">
@@ -1057,20 +1081,23 @@ function SettingsPage({ onBack, user, adminView = false }) {
         </div>)}</div>
         <p className="settings-note">填 -1 表示不限额度，视频单条上限填 0 表示不限。新价格仅影响后续申请，不改变已有订单。</p>
       </section>
-      <section id="admin-billing-orders"><div className="settings-section-title"><h2>会员开通申请</h2><p>线下确认收款后再点击开通；该操作将立即写入用户的会员权益。</p></div>
+      <section id="admin-billing-orders" hidden={adminSection !== 'billing'}><div className="settings-section-title"><h2>会员开通申请</h2><p>线下确认收款后再点击开通；该操作将立即写入用户的会员权益。</p></div>
         {billingOrders.length ? <div className="billing-order-list">{billingOrders.map(order => <div className="billing-order-row" key={order.id}><span><b>{order.username}</b><small>{order.plan_name} · ¥{(order.amount_fen / 100).toFixed(2)} · {new Date(order.created_at).toLocaleString()}</small></span><button type="button" className="primary compact" disabled={busy} onClick={() => fulfillOrder(order)}>确认收款并开通</button></div>)}</div> : <p className="settings-note">目前没有待处理申请。</p>}
       </section>
-      <section id="admin-users"><div className="settings-section-title"><h2>用户管理</h2><p>手动创建账号，不开放陌生人注册。</p></div>
+      <section id="admin-users" hidden={adminSection !== 'users'}><div className="settings-section-title"><h2>用户管理</h2><p>手动创建账号，不开放陌生人注册。</p></div>
         <div className="account-create"><input value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} placeholder="朋友用户名"/><input type="password" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} placeholder="初始密码（至少 12 位）"/><button type="button" className="outline" disabled={busy || newUser.username.trim().length < 3 || newUser.password.length < 12} onClick={createAccount}>创建账号</button></div>
         <div className="user-list">{users.map(item => <div className="user-plan-row" key={item.id}><span>{item.username}<small>{item.role === 'admin' ? '管理员' : '普通用户 · ' + (plans.find(plan => plan.code === item.plan_code)?.name || '免费体验')}</small></span>{item.role !== 'admin' && <div><select value={planSelections[item.id] || item.plan_code || 'free'} onChange={event => setPlanSelections(current => ({...current,[item.id]:event.target.value}))}>{plans.filter(plan => plan.code !== 'admin' && (plan.is_active || plan.code === item.plan_code)).map(plan => <option key={plan.code} value={plan.code}>{plan.name}</option>)}</select><input type="number" min="1" max="3650" aria-label="套餐天数" value={planDays[item.id] || 30} onChange={event => setPlanDays(current => ({...current,[item.id]:event.target.value}))}/><button type="button" className="outline compact" disabled={busy || !plans.find(plan => plan.code === (planSelections[item.id] || item.plan_code || 'free'))?.is_active} onClick={() => assignPlan(item)}>分配套餐</button><button type="button" className="user-delete" aria-label={'删除账号 ' + item.username} title={'删除账号 ' + item.username} disabled={busy} onClick={() => deleteAccount(item)}>删除账号</button></div>}</div>)}</div>
       </section></>}
-      <section><div className="settings-section-title"><h2>登录安全</h2><p>建议每个账号首次登录后修改初始密码。</p></div>
+      <section hidden={adminView && adminSection !== 'system'}><div className="settings-section-title"><h2>登录安全</h2><p>建议每个账号首次登录后修改初始密码。</p></div>
         <div className="field-grid"><label>当前密码<input type="password" value={passwords.current} onChange={e => setPasswords({...passwords,current:e.target.value})}/></label><label>新密码（至少 12 位）<input type="password" value={passwords.next} onChange={e => setPasswords({...passwords,next:e.target.value})}/></label></div>
         <button type="button" className="outline password-button" disabled={busy || !passwords.current || passwords.next.length < 12} onClick={changePassword}>更新登录密码</button>
       </section>
-      {message && <div className="success-line"><Check size={17}/>{message}</div>}{error && <div className="error-line">{error}</div>}
-      {user?.role === 'admin' && <button className="primary save-settings" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18}/> : <Save size={18}/>}保存接口设置</button>}
+      {!adminView && message && <div className="success-line"><Check size={17}/>{message}</div>}{!adminView && error && <div className="error-line">{error}</div>}
+      {user?.role === 'admin' && (!adminView || adminSection === 'providers') && <button className="primary save-settings" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18}/> : <Save size={18}/>}保存接口设置</button>}
     </form>
+      </div>
+    </div>}
+    {adminView && (message || error) && <div className="admin-feedback">{message && <div className="success-line"><Check size={17}/>{message}</div>}{error && <div className="error-line">{error}</div>}</div>}
   </main>
 }
 
