@@ -48,6 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: tingjian-production
+    permissions:
+      contents: read
+      id-token: write
     concurrency:
       group: tingjian-production
       cancel-in-progress: false
@@ -60,16 +63,38 @@ jobs:
           SSH_PORT: ${{ vars.TINGJIAN_SSH_PORT }}
           SSH_KEY: ${{ secrets.TINGJIAN_SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.TINGJIAN_SSH_KNOWN_HOSTS }}
+          TAILSCALE_CLIENT_ID: ${{ vars.TINGJIAN_TAILSCALE_CLIENT_ID }}
+          TAILSCALE_AUDIENCE: ${{ vars.TINGJIAN_TAILSCALE_AUDIENCE }}
         shell: bash
         run: |
           set -euo pipefail
-          for name in SSH_HOST SSH_USER SSH_KEY SSH_KNOWN_HOSTS; do
-            [[ -n "${!name}" ]] || { echo "::error::Missing $name secret"; exit 1; }
+          for name in SSH_HOST SSH_USER SSH_KEY SSH_KNOWN_HOSTS TAILSCALE_CLIENT_ID TAILSCALE_AUDIENCE; do
+            [[ -n "${!name}" ]] || { echo "::error::Missing required deployment setting: $name"; exit 1; }
           done
           [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { echo "::error::Invalid SSH host"; exit 1; }
           [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_.-]*[$]?$ ]] || { echo "::error::Invalid SSH user"; exit 1; }
           port="${SSH_PORT:-22}"
           [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || { echo "::error::Invalid SSH port"; exit 1; }
+
+      - name: Connect to the deployment tailnet
+        uses: tailscale/github-action@99a8333667fff04fdd6cffb46dfd409f8329a7bf # v4
+        with:
+          oauth-client-id: ${{ vars.TINGJIAN_TAILSCALE_CLIENT_ID }}
+          audience: ${{ vars.TINGJIAN_TAILSCALE_AUDIENCE }}
+          tags: tag:tingjian-ci
+          version: 1.104.2
+
+      - name: Verify SSH access and deployment command
+        env:
+          SSH_HOST: ${{ secrets.TINGJIAN_SSH_HOST }}
+          SSH_USER: ${{ secrets.TINGJIAN_SSH_USER }}
+          SSH_PORT: ${{ vars.TINGJIAN_SSH_PORT }}
+          SSH_KEY: ${{ secrets.TINGJIAN_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.TINGJIAN_SSH_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${SSH_PORT:-22}"
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/id_tingjian"
           chmod 600 "$HOME/.ssh/id_tingjian"

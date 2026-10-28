@@ -36,7 +36,7 @@ The output must show Compose supports `--no-build` and `--pull`, confirm all fiv
 ## Deployment behavior
 
 1. Pull request runs continue to run backend syntax and frontend build checks only. The production job runs on `main` pushes or a manual run against `main`, after both checks pass, through the `tingjian-production` GitHub Environment.
-2. GitHub Actions verifies the required secrets and uses strict SSH host-key checking. The host key must be checked against a fingerprint obtained independently from the VPS console.
+2. GitHub Actions joins the Tailscale network with a short-lived GitHub OIDC identity restricted to this repository's `tingjian-production` environment. Its `tag:tingjian-ci` device can reach only SSH on VPS `100.78.228.11`. SSH uses strict host-key checking; the pinned host fingerprint must be checked independently.
 3. Actions sends a gzip-compressed Git archive for the exact commit SHA to the restricted SSH command. It does not require Git or a GitHub credential on the VPS.
 4. The forced command accepts only `check` or `deploy <40-character SHA>`. `check` is read-only. Deployment stages source under the deploy account's private state directory and builds `localhost/github-deploy/tingjian:<SHA>` there, outside `/opt/1panel/apps/tingjian`.
 5. The deploy command reads the app container labels, uses the stable `/opt/1panel/apps/tingjian/docker-compose.yml`, and ignores only the known stale `/var/cache/github-deploy/tingjian-compose.k6G0uoZ3.yaml` label. Before and after the build it checks that the stable config's mounts, ports, networks, explicitly configured environment values, commands, and restart policies match the running containers. It then appends an image override for the three application services.
@@ -44,6 +44,27 @@ The output must show Compose supports `--no-build` and `--pull`, confirm all fiv
 7. If application startup or the health check fails after the update begins, the script attempts to restore the previously running local image for those three services. This cannot undo database migrations or guarantee zero task interruption; retain a separate database backup before an application release that changes the schema.
 
 The local image repository and Compose project name are checked against the current VPS report. If 1Panel changes those names or moves the project, the script fails closed and needs a reviewed update.
+
+## Tailscale access for GitHub Actions
+
+The VPS is reachable from GitHub Actions through Tailscale at `100.78.228.11`; its public SSH route does not complete the SSH handshake. The tailnet currently has four user-owned devices and one exit node. Configure the GitHub OIDC trust credential for subject `repo:GaoSeafood/tingjian:environment:tingjian-production`, with `auth_keys` scope and tag `tag:tingjian-ci`. This creates ephemeral CI devices and requires no long-lived Tailscale key in GitHub.
+
+The tailnet's current default grant allows every device to reach every other device. Replace that broad source with `autogroup:member`, preserve exit-node access, and add the one SSH grant for CI:
+
+```json
+"tagOwners": {
+  "tag:tingjian-ci": ["autogroup:admin"]
+},
+"grants": [
+  {"src": ["autogroup:member"], "dst": ["*"], "ip": ["*"]},
+  {"src": ["autogroup:member"], "dst": ["autogroup:internet"], "ip": ["*"]},
+  {"src": ["tag:tingjian-ci"], "dst": ["100.78.228.11"], "ip": ["tcp:22"]}
+]
+```
+
+This keeps the current user-owned devices' general access and exit-node use, while a tagged GitHub runner can connect only to SSH on the VPS. Do not retain the current `src: ["*"]` grant, because it would also let the CI runner reach every tailnet device.
+
+The VPS currently reports `RunSSH: false` in `tailscale debug prefs`, so Tailscale does not take over its port 22. The runner reaches the standard OpenSSH server and uses the restricted deployment key described below; no Tailscale SSH login rule is needed.
 
 ## One-time server setup
 
@@ -74,11 +95,13 @@ In this repository, create Environment `tingjian-production` before merging the 
 
 | Name | Type | Value |
 | --- | --- | --- |
-| `TINGJIAN_SSH_HOST` | Secret | VPS hostname or IP reachable from GitHub-hosted Actions |
+| `TINGJIAN_SSH_HOST` | Secret | `100.78.228.11` |
 | `TINGJIAN_SSH_USER` | Secret | Dedicated restricted deployment account |
 | `TINGJIAN_SSH_KEY` | Secret | Private key matching only the forced-command public key |
-| `TINGJIAN_SSH_KNOWN_HOSTS` | Secret | Host key line verified against the VPS console fingerprint |
+| `TINGJIAN_SSH_KNOWN_HOSTS` | Secret | Host key line for `100.78.228.11`, verified against the VPS fingerprint |
 | `TINGJIAN_SSH_PORT` | Variable | SSH port; defaults to `22` when empty |
+| `TINGJIAN_TAILSCALE_CLIENT_ID` | Variable | Client ID from the GitHub OIDC trust credential |
+| `TINGJIAN_TAILSCALE_AUDIENCE` | Variable | Audience from the GitHub OIDC trust credential |
 
 Limit the Environment deployment branch to `main`. Add required reviewers if the first release should wait for a manual gate. Never use `StrictHostKeyChecking=no` or trust unverified `ssh-keyscan` output.
 
