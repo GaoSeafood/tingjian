@@ -38,7 +38,7 @@ The output must show Compose supports `--no-build` and `--pull`, confirm all fiv
 1. Pull request runs continue to run backend syntax and frontend build checks only. The production job runs on `main` pushes or a manual run against `main`, after both checks pass, through the `tingjian-production` GitHub Environment.
 2. GitHub Actions joins the Tailscale network with a short-lived GitHub OIDC identity restricted to this repository's `tingjian-production` environment. Its `tag:tingjian-ci` device can reach only SSH on VPS `100.78.228.11`. SSH uses strict host-key checking; the pinned host fingerprint must be checked independently.
 3. Actions sends a gzip-compressed Git archive for the exact commit SHA to the restricted SSH command. It does not require Git or a GitHub credential on the VPS.
-4. The forced command accepts only `check` or `deploy <40-character SHA>`. `check` is read-only. Deployment stages source under the deploy account's private state directory and builds `localhost/github-deploy/tingjian:<SHA>` there, outside `/opt/1panel/apps/tingjian`.
+4. The forced command accepts only `check` or `deploy <40-character SHA>`. `check` is read-only. The account can run only the root-owned deployment wrapper through a no-argument sudo rule. The wrapper stages source in root's private state directory and builds `localhost/github-deploy/tingjian:<SHA>` outside `/opt/1panel/apps/tingjian`.
 5. The deploy command reads the app container labels, uses the stable `/opt/1panel/apps/tingjian/docker-compose.yml`, and ignores only the known stale `/var/cache/github-deploy/tingjian-compose.k6G0uoZ3.yaml` label. Before and after the build it checks that the stable config's mounts, ports, networks, explicitly configured environment values, commands, and restart policies match the running containers. It then appends an image override for the three application services.
 6. It updates only `web`, `worker`, and `worker-ai` with `--no-deps --no-build --pull never`. It does not run `down`, prune images, update PostgreSQL or Redis, or remove volumes. The web health check and running worker states must pass within four minutes.
 7. If application startup or the health check fails after the update begins, the script attempts to restore the previously running local image for those three services. This cannot undo database migrations or guarantee zero task interruption; retain a separate database backup before an application release that changes the schema.
@@ -81,13 +81,30 @@ sudo chown root:root /etc/tingjian-deploy.conf
 sudo chmod 0644 /etc/tingjian-deploy.conf
 ```
 
-The dedicated SSH account needs access to the local Docker daemon to build and update these containers. Membership in the `docker` group is effectively root-level host access, so use a dedicated account and key. Restrict the public key in `authorized_keys` with:
+Create one account and one key pair for this repository. Do not add the account to the `docker` group: that group is effectively root-level host access, and the production `.env` is root-readable only. The deployment wrapper therefore runs as root through one exact sudo rule. This leaves the `.env` permissions unchanged and does not grant the account a general shell or direct Docker access.
 
 ```text
-command="/usr/local/bin/tingjian-deploy",restrict ssh-ed25519 AAAA... tingjian-actions
+sudo useradd --system --create-home --home-dir /var/lib/tingjian-deploy --shell /bin/bash --user-group tingjian-deploy
+sudo passwd --lock tingjian-deploy
+sudo chmod 0700 /var/lib/tingjian-deploy
+
+sudo install -d -o tingjian-deploy -g tingjian-deploy -m 0700 /var/lib/tingjian-deploy/.ssh
+sudo tee /etc/sudoers.d/tingjian-deploy >/dev/null <<'EOF'
+Defaults:tingjian-deploy env_keep += "SSH_ORIGINAL_COMMAND"
+tingjian-deploy ALL=(root) NOPASSWD: /usr/local/bin/tingjian-deploy ""
+EOF
+sudo chown root:root /etc/sudoers.d/tingjian-deploy
+sudo chmod 0440 /etc/sudoers.d/tingjian-deploy
+sudo visudo -cf /etc/sudoers.d/tingjian-deploy
 ```
 
-The script is root-owned but runs as that dedicated account; it accepts no shell command, port forwarding, PTY, or arbitrary deployment path. Verify the installed wrapper with the key using `check`; it reads Docker metadata and Compose configuration without changing them.
+Put the generated public key in `/var/lib/tingjian-deploy/.ssh/authorized_keys`, owned by `tingjian-deploy` with mode `0600`, using this restriction:
+
+```text
+command="/usr/bin/sudo -n /usr/local/bin/tingjian-deploy",restrict ssh-ed25519 AAAA... tingjian-actions
+```
+
+The SSH key accepts only `check` or `deploy <40-character SHA>` through the root-owned wrapper. It has no shell, file transfer, port forwarding, or PTY access. Keep the private key only in the `tingjian-production` GitHub Environment. Verify the installed key with `check`; the wrapper reads Docker metadata and Compose configuration without changing containers, images, volumes, or application files.
 
 ## GitHub Environment
 
