@@ -42,82 +42,89 @@ jobs:
 
 
   deploy:
-    name: Deploy production after CI
+    name: Deploy tingjian over SSH
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [backend, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: tingjian-production
     permissions:
       contents: read
+      id-token: write
+    concurrency:
+      group: tingjian-production
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - name: Check whether production source changed
-        id: scope
-        shell: bash
+      - name: Verify deployment configuration exists
         env:
-          BEFORE_SHA: ${{ github.event.before }}
-          TARGET_SHA: ${{ github.sha }}
+          SSH_HOST: ${{ secrets.TINGJIAN_SSH_HOST }}
+          SSH_USER: ${{ secrets.TINGJIAN_SSH_USER }}
+          SSH_PORT: ${{ vars.TINGJIAN_SSH_PORT }}
+          SSH_KEY: ${{ secrets.TINGJIAN_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.TINGJIAN_SSH_KNOWN_HOSTS }}
+          TAILSCALE_CLIENT_ID: ${{ vars.TINGJIAN_TAILSCALE_CLIENT_ID }}
+          TAILSCALE_AUDIENCE: ${{ vars.TINGJIAN_TAILSCALE_AUDIENCE }}
+        shell: bash
         run: |
           set -euo pipefail
-          before_sha="$BEFORE_SHA"
-          if [[ -z "$before_sha" || "$before_sha" =~ ^0+$ ]]; then before_sha="$(git rev-parse "$TARGET_SHA^" 2>/dev/null || true)"; fi
-          if [[ -z "$before_sha" ]]; then changed_files="$(git diff-tree --no-commit-id --name-only -r "$TARGET_SHA")"; else changed_files="$(git diff --name-only "$before_sha" "$TARGET_SHA")"; fi
-          echo "before_sha=$before_sha" >> "$GITHUB_OUTPUT"
-          if grep -Eiv '^(\.github/|docs/|README([^/]*)?$|AGENTS\.md$|CONTRIBUTING\.md$|.*\.md$)' <<<"$changed_files" | grep -q .; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Queue signed deployment and wait for the server
-        if: steps.scope.outputs.changed == 'true'
+          for name in SSH_HOST SSH_USER SSH_KEY SSH_KNOWN_HOSTS TAILSCALE_CLIENT_ID TAILSCALE_AUDIENCE; do
+            [[ -n "${!name}" ]] || { echo "::error::Missing required deployment setting: $name"; exit 1; }
+          done
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { echo "::error::Invalid SSH host"; exit 1; }
+          [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_.-]*[$]?$ ]] || { echo "::error::Invalid SSH user"; exit 1; }
+          port="${SSH_PORT:-22}"
+          [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || { echo "::error::Invalid SSH port"; exit 1; }
+
+      - name: Connect to the deployment tailnet
+        uses: tailscale/github-action@99a8333667fff04fdd6cffb46dfd409f8329a7bf # v4
+        with:
+          oauth-client-id: ${{ vars.TINGJIAN_TAILSCALE_CLIENT_ID }}
+          audience: ${{ vars.TINGJIAN_TAILSCALE_AUDIENCE }}
+          tags: tag:tingjian-ci
+          version: 1.104.2
+
+      - name: Verify SSH access and deployment command
         env:
-          DEPLOY_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
-          DEPLOY_URL: https://ad.gaoseafood.com/api/deploy-hook/tingjian
-          DEPLOY_STATUS_URL: https://ad.gaoseafood.com/api/deploy-hook/tingjian/status
-          REPOSITORY: ${{ github.repository }}
-          REF: ${{ github.ref }}
-          BEFORE_SHA: ${{ steps.scope.outputs.before_sha }}
-          TARGET_SHA: ${{ github.sha }}
-          DELIVERY_ID: ${{ github.run_id }}
+          SSH_HOST: ${{ secrets.TINGJIAN_SSH_HOST }}
+          SSH_USER: ${{ secrets.TINGJIAN_SSH_USER }}
+          SSH_PORT: ${{ vars.TINGJIAN_SSH_PORT }}
+          SSH_KEY: ${{ secrets.TINGJIAN_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.TINGJIAN_SSH_KNOWN_HOSTS }}
+        shell: bash
         run: |
-          node --input-type=module <<'NODE'
-          import { createHmac } from 'node:crypto'
-          const secret = process.env.DEPLOY_SECRET
-          if (!secret || secret.length < 32) throw new Error('deployment secret is not configured')
-          const payload = {
-            repository: { full_name: process.env.REPOSITORY },
-            ref: process.env.REF,
-            before: process.env.BEFORE_SHA,
-            after: process.env.TARGET_SHA,
-          }
-          const body = JSON.stringify(payload)
-          const signature = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex')
-          const accepted = await fetch(process.env.DEPLOY_URL, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'x-github-event': 'push',
-              'x-github-delivery': process.env.DELIVERY_ID,
-              'x-hub-signature-256': signature,
-            },
-            body,
-          })
-          const receipt = await accepted.json()
-          if (!accepted.ok || receipt.queued !== true) throw new Error('server did not queue the deployment')
-          const statusUrl = new URL(process.env.DEPLOY_STATUS_URL)
-          statusUrl.searchParams.set('sha', process.env.TARGET_SHA)
-          for (let attempt = 0; attempt < 120; attempt++) {
-            const response = await fetch(statusUrl, { headers: { 'x-deploy-token': secret } })
-            const state = await response.json()
-            if (!response.ok) throw new Error('server deployment status could not be read')
-            if (state.status === 'succeeded') {
-              console.log('Production deployment succeeded for ' + state.sha)
-              process.exit(0)
-            }
-            if (state.status === 'failed') throw new Error('Production deployment failed: ' + (state.message || 'see server deployment logs'))
-            await new Promise(resolve => setTimeout(resolve, 10000))
-          }
-          throw new Error('Timed out waiting for the server deployment')
-          NODE
+          set -euo pipefail
+          port="${SSH_PORT:-22}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/id_tingjian"
+          chmod 600 "$HOME/.ssh/id_tingjian"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          ssh -F /dev/null -i "$HOME/.ssh/id_tingjian" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+            -p "$port" -- "$SSH_USER@$SSH_HOST" check
+      - name: Deploy exact main commit source over the restricted SSH command
+        env:
+          SSH_HOST: ${{ secrets.TINGJIAN_SSH_HOST }}
+          SSH_USER: ${{ secrets.TINGJIAN_SSH_USER }}
+          SSH_PORT: ${{ vars.TINGJIAN_SSH_PORT }}
+          SSH_KEY: ${{ secrets.TINGJIAN_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.TINGJIAN_SSH_KNOWN_HOSTS }}
+          DEPLOY_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::Invalid deployment SHA"; exit 1; }
+          port="${SSH_PORT:-22}"
+          [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || { echo "Invalid SSH port"; exit 1; }
+          latest_main="$(git ls-remote origin refs/heads/main | cut -f1)"
+          [[ -n "$latest_main" ]] || { echo "::error::Could not read the current main SHA"; exit 1; }
+          if [[ "$DEPLOY_SHA" != "$latest_main" ]]; then
+            echo "Skipping superseded deployment $DEPLOY_SHA; main is now $latest_main"
+            exit 0
+          fi
+          git archive --format=tar "$DEPLOY_SHA" | gzip -1 | ssh -T -F /dev/null -i "$HOME/.ssh/id_tingjian" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+            -p "$port" -- "$SSH_USER@$SSH_HOST" "deploy $DEPLOY_SHA"
