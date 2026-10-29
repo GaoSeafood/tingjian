@@ -606,7 +606,11 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
     mediaRef.current.currentTime = seconds
     mediaRef.current.play().catch(() => {})
   }, [])
-  const mediaSrc = `/api/tasks/${taskId}/media?${mediaMode === 'local' ? 'local=1&' : ''}v=${mediaRetryCount}`
+  // Platforms such as Kuaishou already provide a complete local video. Use it
+  // immediately instead of requesting a second download while ASR is running.
+  const hasLocalVideo = task?.source_available && task?.local_media_kind === 'video'
+  const playbackMode = mediaMode === 'remote' && (task?.playback_fallback_available || (hasLocalVideo && !task?.playback_url)) ? 'local' : mediaMode
+  const mediaSrc = `/api/tasks/${taskId}/media?${playbackMode === 'local' ? 'local=1&' : ''}v=${mediaRetryCount}`
   const linkedVideo = task?.source_type === 'url' && !/\.(mp3|wav|m4a|aac|flac|ogg|opus)(?:$|[?#])/i.test(task?.source_url || '')
   const preparePlaybackFallback = async () => {
     if (playbackFallbackInProgress.current) return
@@ -626,17 +630,13 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
     }
   }
   useEffect(() => {
-    if (!task || mediaMode !== 'remote' || !linkedVideo || !task.source_available) return
-    if (task.playback_fallback_available) {
-      setMediaMode('local')
-      setMediaRetryCount(current => current + 1)
-      return
-    }
+    // The fallback endpoint requires the retention deadline set on completion.
+    if (!task || task.status !== 'completed' || playbackMode !== 'remote' || !linkedVideo || !task.source_available) return
     if (!task.playback_url || task.playback_kind !== 'video') void preparePlaybackFallback()
-  }, [task?.id, task?.playback_url, task?.playback_kind, task?.playback_fallback_available, mediaMode, linkedVideo])
+  }, [task?.id, task?.status, task?.source_available, task?.playback_url, task?.playback_kind, playbackMode, linkedVideo])
   const handleMediaError = async () => {
     if (playbackFallbackInProgress.current) return
-    if (mediaMode === 'remote' && task?.source_platform === '抖音' && !mediaRefreshAttempted) {
+    if (playbackMode === 'remote' && task?.source_platform === '抖音' && !mediaRefreshAttempted) {
       setMediaRefreshAttempted(true)
       try {
         await api.refreshPlayback(taskId)
@@ -645,7 +645,7 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
         return
       } catch {}
     }
-    if (mediaMode === 'remote' && linkedVideo) {
+    if (playbackMode === 'remote' && linkedVideo && task?.status === 'completed') {
       await preparePlaybackFallback()
       return
     }
@@ -689,7 +689,7 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
     </section>
     {notice && <div className="notice inline-notice">{notice}</div>}
     <div className={`detail-result-grid ${transcriptionComplete ? '' : 'pending-grid'}`}>
-      <SourceMedia task={task} displayProgress={displayProgress} mediaRef={mediaRef} mediaSrc={mediaSrc} mediaMode={mediaMode} mediaRetryCount={mediaRetryCount} onMediaError={handleMediaError} onRetryMedia={retryMedia} onCopyLink={copySourceLink} onDownloadVideo={downloadOriginalVideo} downloadBusy={downloadBusy}/>
+      <SourceMedia task={task} displayProgress={displayProgress} mediaRef={mediaRef} mediaSrc={mediaSrc} mediaMode={playbackMode} mediaRetryCount={mediaRetryCount} onMediaError={handleMediaError} onRetryMedia={retryMedia} onCopyLink={copySourceLink} onDownloadVideo={downloadOriginalVideo} downloadBusy={downloadBusy}/>
       <section className="transcript-column-card">
         {transcriptionComplete ? <>
           <div className="ai-panel">
