@@ -320,7 +320,7 @@ function Home({ tasks, refresh, onOpen, lang }) {
             {error && <div className="error-line spacious">{error}</div>}
           </div>
         </section>
-        <div className="home-platforms"><span>{tr(lang, 'platforms')}</span><i/>抖音<i/>小红书<i/>B 站<i/>YouTube<i/>{tr(lang, 'localMedia')}</div>
+        <div className="home-platforms"><span>{tr(lang, 'platforms')}</span><i/>抖音<i/>快手<i/>小红书<i/>B 站<i/>YouTube<i/>{tr(lang, 'localMedia')}</div>
         <div className="home-benefits"><span><Check size={16}/>{tr(lang, 'benefit1')}</span><span><LockKeyhole size={15}/>{tr(lang, 'benefit2')}</span><span><Clock3 size={15}/>{tr(lang, 'benefit3')}</span></div>
       </div>
     </section>

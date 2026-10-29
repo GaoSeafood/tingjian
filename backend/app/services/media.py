@@ -15,12 +15,14 @@ import requests
 import yt_dlp
 
 from ..config import settings
+from .kuaishou import download_kuaishou_video, is_kuaishou_url
 
 
 ALLOWED_HOST_SUFFIXES = (
     "bilibili.com", "b23.tv", "douyin.com", "iesdouyin.com", "youtube.com",
     "youtu.be", "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn",
     "tiktok.com", "instagram.com", "twitter.com", "x.com",
+    "kuaishou.com", "kuaishou.cn", "gifshow.com",
 )
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -90,6 +92,7 @@ def source_platform_label(url: str | None) -> str:
     host = (urlparse(url or "").hostname or "").lower().rstrip(".")
     groups = (
         (("douyin.com", "iesdouyin.com"), "抖音"),
+        (("kuaishou.com", "kuaishou.cn", "gifshow.com"), "快手"),
         (("xiaohongshu.com", "xhslink.com"), "小红书"),
         (("bilibili.com", "b23.tv"), "哔哩哔哩"),
         (("youtube.com", "youtu.be"), "YouTube"),
@@ -764,6 +767,17 @@ def _select_playback_urls(info: dict | None) -> tuple[str | None, str | None]:
 
 def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | None, str | None]:
     normalized_url = validate_public_url(url)
+    if is_kuaishou_url(normalized_url):
+        media_path, title = download_kuaishou_video(
+            normalized_url, task_dir, settings.max_upload_mb * 1024 * 1024,
+        )
+        if not _has_audio_stream(media_path):
+            raise RuntimeError("这个快手视频没有可用音轨，无法听写")
+        if probe_duration(media_path) >= settings.url_audio_only_minutes * 60:
+            audio_path = _extract_source_audio(media_path, task_dir)
+            media_path.unlink(missing_ok=True)
+            return audio_path, title, True, None, None
+        return media_path, title, False, None, None
     if is_direct_media_url(normalized_url):
         suffix = _direct_media_suffix(normalized_url)
         if suffix in VIDEO_SUFFIXES:
@@ -887,6 +901,14 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | Non
 def download_original_video(url: str, task_dir: Path, progress_callback=None, *, use_douyin_cookies: bool = False) -> tuple[Path, str]:
     """Download a user-requested video artifact (never switch to audio-only)."""
     normalized_url = validate_public_url(url)
+    if is_kuaishou_url(normalized_url):
+        path, title = download_kuaishou_video(
+            normalized_url, task_dir, settings.max_upload_mb * 1024 * 1024, progress_callback,
+        )
+        if not _has_video_stream(path):
+            path.unlink(missing_ok=True)
+            raise RuntimeError("这个快手作品没有可用的视频画面")
+        return path, title
     if is_direct_media_url(normalized_url):
         if Path(urlparse(normalized_url).path).suffix.lower() in AUDIO_SUFFIXES:
             raise RuntimeError("这个链接是音频文件；下载视频请粘贴视频链接")

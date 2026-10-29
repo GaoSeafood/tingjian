@@ -12,7 +12,7 @@
 
 - 本地视频或音频上传，最大文件大小可配置
 - 视频链接可单独创建下载任务；下载和听写互不强制，下载文件按原视频保留策略在服务器临时保存并自动清理
-- B站、抖音、YouTube、小红书、微博等公开视频链接解析，支持从整段分享文案中自动提取链接，也支持腾讯等直链
+- B站、抖音、快手、YouTube、小红书、微博等公开视频链接解析，支持从整段分享文案中自动提取链接，也支持腾讯等直链
 - 支持 MiMo-V2.5-ASR、自定义 Whisper 兼容 ASR 或 AssemblyAI；AssemblyAI 会在云端完成多人对话说话人标记和时间码
 - 保留 OpenAI Whisper 兼容的自定义 ASR 接口
 - 可编辑听写稿，支持复制及 TXT / SRT 导出
@@ -27,6 +27,10 @@
 - 长链接任务会根据时长自动切换为只下载音频模式，避免下载和转码不必要的视频流
 
 ## 架构
+
+快手支持 `www.kuaishou.com/f/分享码`、`v.kuaishou.com/分享码` 和 `www.kuaishou.com/short-video/作品ID` 等公开作品链接。后端直接读取分享页的视频数据并下载到任务临时目录，再使用现有 ASR 服务听写；无需新增解析服务或登录 Cookie。需要登录、验证码或已失效的作品会提示失败，可改为上传本地视频。分享页和媒体下载的每次重定向都会验证 HTTPS、平台/CDN 域名与公网地址，并遵循原有文件大小和清理策略。
+
+解析方式调研参考：[`JoeanAmier/KS-Downloader`](https://github.com/JoeanAmier/KS-Downloader) 的分享页数据结构，以及 [`zyipeng/video-downloader`](https://github.com/zyipeng/video-downloader) 的快手分享页解析方案。本仓库独立实现所需适配，不引入这些项目的源码或运行依赖。
 
 - 前端：React + Vite
 - API：FastAPI
@@ -66,4 +70,5 @@ docker compose up -d --build
 - 面向开发 Agent 的项目约定、关键业务规则和验证命令见 [`AGENTS.md`](AGENTS.md)。
 - 前端生产构建：`npm --prefix frontend ci && npm --prefix frontend run build`
 - 后端语法检查：`python -m compileall -q backend/app`（需本机已安装 Python）
+- 快手解析与下载回归检查：`PYTHONPATH=backend python -m unittest discover -s backend/tests -v`（安装后端依赖后运行，测试使用合成响应，无需网络或 ASR 密钥）
 - 完整运行建议使用 Docker Compose；本地 `.env`、数据库和媒体数据不会提交到版本库。

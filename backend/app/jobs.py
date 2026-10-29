@@ -37,7 +37,7 @@ def _schedule_cleanup(task_id: str, delay: timedelta):
 
 def _needs_title_repair(title: str | None) -> bool:
     value = str(title or '').strip()
-    if not value or value in {'网络视频', '未命名视频', 'video', 'audio'}:
+    if not value or value in {'网络视频', '快手视频', '未命名视频', 'video', 'audio'}:
         return True
     if '\ufffd' in value or re.search(r'[ÃÂÐÑ][\x80-\xff]', value):
         return True
