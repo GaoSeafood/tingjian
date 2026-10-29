@@ -240,7 +240,8 @@ def reserve_ai_use(db: Session, user: User, task_id: str, feature: str) -> None:
         if used >= limit:
             raise HTTPException(402, f"本周期的{AI_FEATURE_NAMES[feature]}次数已用完，请升级套餐或等待额度重置。")
     db.add(AIFeatureUsage(user_id=user.id, task_id=task_id, feature=feature, status="reserved"))
-    db.commit()
+    # Commit with queued state while the caller still holds the task row lock.
+    db.flush()
 
 
 def settle_ai_use(db: Session, task_id: str, feature: str, success: bool) -> None:
