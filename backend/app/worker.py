@@ -50,6 +50,8 @@ def enqueue(func, *args):
     options = {"job_timeout": settings.job_timeout_seconds, "result_ttl": 86400, "failure_ttl": 604800}
     if getattr(func, "__name__", "") in {"transcribe_task", "download_source_task"}:
         options["on_failure"] = transcription_failure
+    if getattr(func, "__name__", "") in AI_FEATURES:
+        options["on_failure"] = ai_failure
     priority = "normal"
     if args and isinstance(args[0], str):
         from .billing import get_entitlement
@@ -66,6 +68,34 @@ def enqueue(func, *args):
                         priority = "ultra"
                     elif plan.code.startswith("pro_"):
                         priority = "pro"
-    is_ai = getattr(func, "__name__", "") in {"highlight_task", "analyze_visual_task", "rewrite_task", "summarize_task", "translate_task"}
+    is_ai = getattr(func, "__name__", "") in AI_FEATURES
     target = (ultra_ai_queue if priority == "ultra" else pro_ai_queue if priority == "pro" else ai_queue) if is_ai else (ultra_queue if priority == "ultra" else pro_queue if priority == "pro" else queue)
     return target.enqueue(func, *args, **options)
+
+
+AI_FEATURES = {"highlight_task": "highlights", "analyze_visual_task": "visual", "rewrite_task": "rewrite",
+               "summarize_task": "summary", "translate_task": "translate", "question_task": "summary"}
+
+
+def ai_failure(job, connection, exc_type, exc_value, traceback):
+    """RQ timeouts must release quota and unlock the UI."""
+    from .database import SessionLocal
+    from .models import Task, utcnow
+    from .billing import settle_ai_use
+    feature = AI_FEATURES.get(job.func_name.rsplit(".", 1)[-1])
+    if not feature or not job.args:
+        return
+    with SessionLocal() as db:
+        task = db.get(Task, str(job.args[0]))
+        if task:
+            if feature == "visual":
+                if task.visual_status in {"completed", "failed"}:
+                    return
+                task.visual_status, task.visual_message = "failed", "画面分析中断，请重试；本次额度已退回"
+            else:
+                if task.ai_status in {"idle", "failed"}:
+                    return
+                task.ai_status, task.ai_message = "failed", "AI 处理中断，请重试；本次额度已退回"
+            task.updated_at = utcnow()
+            db.commit()
+            settle_ai_use(db, task.id, feature, False)

@@ -23,6 +23,7 @@ ALLOWED_HOST_SUFFIXES = (
     "youtu.be", "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn",
     "tiktok.com", "instagram.com", "twitter.com", "x.com",
     "kuaishou.com", "kuaishou.cn", "gifshow.com",
+    "vimeo.com", "dailymotion.com", "dai.ly", "reddit.com", "redd.it", "twitch.tv",
 )
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -58,6 +59,8 @@ def validate_public_url(url: str) -> str:
     parsed = urlparse(url.strip())
     if parsed.scheme != "https" or not parsed.hostname:
         raise ValueError("仅支持 HTTPS 视频链接")
+    if parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise ValueError("不支持含登录信息或自定义端口的视频链接")
     host = parsed.hostname.lower().rstrip(".")
     try:
         addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
@@ -65,7 +68,7 @@ def validate_public_url(url: str) -> str:
         raise ValueError("无法解析视频地址") from exc
     for item in addresses:
         ip = ipaddress.ip_address(item[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        if not ip.is_global:
             raise ValueError("不允许访问内网或本机地址")
     supported_host = any(host == suffix or host.endswith(f".{suffix}") for suffix in ALLOWED_HOST_SUFFIXES)
     direct_media_host = any(host == suffix or host.endswith(f".{suffix}") for suffix in DIRECT_MEDIA_HOST_SUFFIXES)
@@ -100,6 +103,10 @@ def source_platform_label(url: str | None) -> str:
         (("weibo.com", "weibo.cn"), "微博"),
         (("instagram.com",), "Instagram"),
         (("twitter.com", "x.com"), "X / Twitter"),
+        (("vimeo.com",), "Vimeo"),
+        (("dailymotion.com", "dai.ly"), "Dailymotion"),
+        (("reddit.com", "redd.it"), "Reddit"),
+        (("twitch.tv",), "Twitch"),
         (("oceanengine.com",), "抖音"),
         (("qq.com", "qpic.cn", "qlogo.cn", "weixin.qq.com", "wechat.com"), "腾讯/微信"),
     )
@@ -605,6 +612,7 @@ def refresh_douyin_playback(url: str, task_dir: Path) -> tuple[str, str | None]:
 def _yt_dlp_options(url: str, *, use_douyin_cookies: bool = True, **overrides) -> dict:
     options = {
         "noplaylist": True,
+        "js_runtimes": {"node": {}},
         "quiet": True,
         # Some CDN edges take longer than the default probe timeout to return
         # headers.  Direct media URLs use the streaming downloader below, but

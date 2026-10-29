@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards,
 } from 'lucide-react'
 import { api } from './api'
+import WorkspaceHistory from './WorkspaceHistory'
 
 const COPY = {
   zh: {
@@ -67,11 +68,9 @@ function taskDisplayProgress(task, now = Date.now()) {
   if (!task) return 0
   const reported = Math.max(0, Math.min(100, Number(task.progress) || 0))
   if (task.task_kind === 'download') return task.status === 'completed' ? 100 : reported
-  if (task.status === 'completed') {
-    const finishedAt = Date.parse(task.updated_at || '')
-    if (!Number.isFinite(finishedAt)) return 100
-    return Math.min(100, 90 + Math.max(0, now - finishedAt) / 400)
-  }
+  // Saving a draft or completing an AI action also updates updated_at.
+  // A finished transcript must stay editable through those updates.
+  if (task.status === 'completed') return 100
   if (task.status === 'failed') return reported
   const createdAt = Date.parse(task.created_at || '')
   const elapsedSeconds = Number.isFinite(createdAt) ? Math.max(0, (now - createdAt) / 1000) : 0
@@ -260,6 +259,7 @@ function Home({ tasks, refresh, onOpen, lang }) {
   const [input, setInput] = useState('')
   const [mode, setMode] = useState('transcribe')
   const [batchMode, setBatchMode] = useState(false)
+  const [extractionMode, setExtractionMode] = useState('prefer_subtitles')
   const [drag, setDrag] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -269,10 +269,10 @@ function Home({ tasks, refresh, onOpen, lang }) {
     try {
       if (mode === 'transcribe' && batchMode && !nextFile) {
         const urls = nextInput.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
-        const result = await api.batch(urls)
+        const result = await api.batch(urls, extractionMode)
         await refresh(); onOpen(result.tasks[0].id)
       } else {
-        const task = mode === 'download' ? await api.download(nextInput) : nextFile ? await api.upload(nextFile) : await api.url(nextInput)
+        const task = mode === 'download' ? await api.download(nextInput) : nextFile ? await api.upload(nextFile) : await api.url(nextInput, extractionMode)
         await refresh(); onOpen(task.id)
       }
     } catch (err) { setError(err.message) } finally { setBusy(false) }
@@ -316,6 +316,10 @@ function Home({ tasks, refresh, onOpen, lang }) {
           </div>
           {file && <span className="file-pill">{file.type.startsWith('audio/') ? <AudioLines size={15}/> : <Video size={15}/>} {file.name} · {fileSize(file.size)}<button type="button" aria-label="移除已选文件" title="移除文件" onClick={clearFile}><X size={15}/></button></span>}
           <div className="home-form-foot">
+            {mode === 'transcribe' && !file && <label className="extraction-mode">{lang === 'en' ? 'Extraction mode' : '提取方式'}<select aria-label="文案提取方式" value={extractionMode} onChange={e => setExtractionMode(e.target.value)} disabled={busy}>
+              <option value="prefer_subtitles">{lang === 'en' ? 'Subtitles first, audio as fallback' : '字幕优先：无字幕时自动听写'}</option>
+              <option value="asr">{lang === 'en' ? 'Transcribe audio' : '重新听写：始终根据音频识别'}</option>
+            </select><small>{lang === 'en' ? 'Subtitle lookup is available for Bilibili and YouTube.' : 'B站、YouTube 可尝试提取现成字幕，结果会标明来源。'}</small></label>}
             <p className="unified-hint">{mode === 'download' ? tr(lang, 'hintDownload') : file ? tr(lang, 'hintFile') : tr(lang, 'hintTranscribe')}</p>
             {error && <div className="error-line spacious">{error}</div>}
           </div>
@@ -340,7 +344,7 @@ function Home({ tasks, refresh, onOpen, lang }) {
   </main>
 }
 
-function TranscriptEditor({ segments, showTimes, showSpeakers, onChange }) {
+function TranscriptEditor({ segments, showTimes, showSpeakers, onChange, disabled = false }) {
   const areaRef = useRef(null)
   const value = segments.map(segment => {
     const speaker = showSpeakers && segment.speaker ? `[${segment.speaker}] ` : ''
@@ -365,7 +369,7 @@ function TranscriptEditor({ segments, showTimes, showSpeakers, onChange }) {
       return {...base, text}
     }))
   }
-  return <div className="transcript-editor"><textarea ref={areaRef} value={value} onChange={edit} spellCheck="false" wrap="soft" placeholder="听写内容会显示在这里…" /></div>
+  return <div className="transcript-editor"><textarea ref={areaRef} aria-label="编辑听写稿" disabled={disabled} value={value} onChange={edit} spellCheck="false" wrap="soft" placeholder="听写内容会显示在这里…" /></div>
 }
 
 function clockSeconds(value) {
@@ -495,7 +499,7 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
     </section>
 }
 
-function Detail({ taskId, onBack, refresh, onOpen }) {
+function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
   const [task, setTask] = useState(null)
   const displayProgress = Math.round(useTaskDisplayProgress(task))
   const [segments, setSegments] = useState([])
@@ -506,6 +510,11 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
   const [direction, setDirection] = useState('')
   const [action, setAction] = useState(null)
   const [rewriteView, setRewriteView] = useState('preview')
+  const [rewriteDraft, setRewriteDraft] = useState('')
+  const [rewriteDirty, setRewriteDirty] = useState(false)
+  const [rewriteSaving, setRewriteSaving] = useState(false)
+  const [transcriptSaving, setTranscriptSaving] = useState(false)
+  const [question, setQuestion] = useState('')
   const [translateLanguage, setTranslateLanguage] = useState('英语')
   const [activeTool, setActiveTool] = useState('highlights')
   const [notice, setNotice] = useState('')
@@ -518,15 +527,18 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
   const playbackFallbackInProgress = useRef(false)
   const taskIdRef = useRef(taskId)
   const dirtyRef = useRef(dirty)
+  const rewriteDirtyRef = useRef(false)
   const loadRequestRef = useRef(0)
   taskIdRef.current = taskId
   dirtyRef.current = dirty
+  rewriteDirtyRef.current = rewriteDirty
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current
     const next = await api.task(taskId)
     // A slower response from an earlier poll must not replace newer task data.
     if (requestId !== loadRequestRef.current || taskIdRef.current !== taskId) return next
-    setTask(next)
+    setTask(current => rewriteDirtyRef.current ? {...next, rewrite_text: current?.rewrite_text, rewrite_version: current?.rewrite_version} : next)
+    if (!rewriteDirtyRef.current) setRewriteDraft(next.rewrite_text || '')
     if (!dirtyRef.current) setSegments(next.segments || [])
     return next
   }, [taskId])
@@ -539,6 +551,12 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
     finally { setRetryBusy(false) }
   }
   useEffect(() => { load().catch(console.error) }, [load])
+  useEffect(() => {
+    onDirtyChange(dirty || rewriteDirty)
+    const warn = event => { if (dirty || rewriteDirty) { event.preventDefault(); event.returnValue = '' } }
+    window.addEventListener('beforeunload', warn)
+    return () => { window.removeEventListener('beforeunload', warn); onDirtyChange(false) }
+  }, [dirty, rewriteDirty, onDirtyChange])
   useEffect(() => { setMediaMode('remote'); setMediaRetryCount(0); setMediaRefreshAttempted(false); playbackFallbackInProgress.current = false }, [taskId])
   const visualTaskRunning = task && !['idle', 'completed', 'failed'].includes(task.visual_status || 'idle')
   const aiTaskRunning = task && !['idle', 'completed', 'failed'].includes(task.ai_status)
@@ -554,33 +572,63 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
     timer = setTimeout(poll, 1800)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [shouldPoll, load])
-  const save = async () => { setTask(await api.saveTranscript(taskId, segments)); setDirty(false); setNotice('已保存修改') }
+  const save = async () => {
+    setTranscriptSaving(true)
+    try {
+      const saved = await api.saveTranscript(taskId, segments, task.transcript_revision)
+      setTask(current => ({...current, ...saved})); dirtyRef.current = false; setDirty(false)
+      setNotice('已保存听写稿，已有 AI 结果可按需重新生成')
+    } finally { setTranscriptSaving(false) }
+  }
+  const saveRewrite = async () => {
+    setRewriteSaving(true)
+    try {
+      const saved = await api.saveRewrite(taskId, rewriteDraft, task.rewrite_version)
+      setTask(current => ({...current, ...saved})); rewriteDirtyRef.current = false; setRewriteDirty(false)
+      setNotice('改写稿已保存到版本记录')
+    } finally { setRewriteSaving(false) }
+  }
+  const ensureSaved = async () => {
+    if (dirtyRef.current) await save()
+    if (rewriteDirtyRef.current) await saveRewrite()
+  }
   const showHighlights = () => { setActiveTool('highlights'); setAction(null); setNotice('') }
   const startHighlights = async () => {
     showHighlights(); setAction('highlights')
-    try { await api.highlights(taskId); await load() }
+    try { await ensureSaved(); await api.highlights(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startSummary = async () => {
     setActiveTool('summary'); setAction('summary'); setNotice('')
-    try { await api.summarize(taskId); await load() }
+    try { await ensureSaved(); await api.summarize(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startTranslation = async () => {
     setActiveTool('translate'); setAction('translate'); setNotice('')
-    try { await api.translate(taskId, translateLanguage); await load() }
+    try { await ensureSaved(); await api.translate(taskId, translateLanguage); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const showVisualAnalysis = () => { setActiveTool('visual'); setAction(null); setNotice('') }
   const startVisualAnalysis = async () => {
     showVisualAnalysis(); setAction('visual')
-    try { await api.visualAnalysis(taskId); await load() }
+    try { await ensureSaved(); await api.visualAnalysis(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startRewrite = async () => {
     setActiveTool('rewrite'); setAction('rewrite'); setNotice('')
-    try { await api.rewrite(taskId, direction); await load() }
+    try { await ensureSaved(); await api.rewrite(taskId, direction); await load() }
     catch (err) { setAction('rewrite'); setNotice(err.message) }
+  }
+  const askQuestion = async () => {
+    setNotice('')
+    try { await ensureSaved(); await api.ask(taskId, question); await load() }
+    catch (err) { setNotice(err.message) }
+  }
+  const retranscribe = async () => {
+    setRetryBusy(true); setNotice('')
+    try { await ensureSaved(); const next = await api.retranscribe(taskId); await refresh(); onOpen(next.id) }
+    catch (err) { setNotice(err.message) }
+    finally { setRetryBusy(false) }
   }
   const copySourceLink = async () => {
     try { await navigator.clipboard.writeText(task.source_url); setNotice('已复制原视频链接') }
@@ -602,7 +650,8 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
   }
   const seekTo = useCallback((value) => {
     const seconds = clockSeconds(value)
-    if (seconds === null || !mediaRef.current) return
+    if (seconds === null) return
+    if (!mediaRef.current) { setNotice(`原媒体暂不可播放，可在原视频的 ${value} 处查看引用`); return }
     mediaRef.current.currentTime = seconds
     mediaRef.current.play().catch(() => {})
   }, [])
@@ -674,9 +723,10 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
     setDirty(true)
   }
   const visualRunning = !['idle', 'completed', 'failed'].includes(task.visual_status || 'idle')
-  const running = !['idle', 'completed', 'failed'].includes(task.ai_status) || visualRunning
+  const running = !['idle', 'completed', 'failed'].includes(task.ai_status) || visualRunning || transcriptSaving || rewriteSaving
   const hasVisualStyle = task.visual_analysis?.some(item => item.kind === 'style_analysis')
   const canAnalyzeVisuals = task.media_kind !== 'audio' || (Boolean(task.playback_url) && task.playback_kind === 'video')
+  const retainedSubtitleVideo = ['author_subtitles', 'automatic_subtitles'].includes(task.transcript_source) && task.source_delete_at && new Date(task.source_delete_at) > new Date()
   const transcriptionComplete = task.status === 'completed' && displayProgress >= 100
   const transcriptionFailed = task.status === 'failed'
   const transcriptPreview = segments.slice(0, 2).map(segment => segment.text).join(' ')
@@ -688,6 +738,9 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
       <div className="result-excerpt-row"><p>{transcriptPreview || (transcriptionFailed ? task.error : transcriptionComplete ? '暂无听写内容' : `${task.message} ${displayProgress}%`)}</p>{transcriptPreview && <button type="button" className="icon-button" aria-label="复制文案摘要" title="复制文案摘要" onClick={() => copyResultText(transcriptPreview, '文案摘要')}><Copy size={17}/></button>}</div>
     </section>
     {notice && <div className="notice inline-notice">{notice}</div>}
+    {transcriptionComplete && <div className="transcript-provenance"><span>文案来源：{{author_subtitles: '作者字幕', automatic_subtitles: '平台自动字幕', asr: '语音转写'}[task.transcript_source] || '语音转写'}{task.transcript_language && task.transcript_language !== 'auto' ? ` · ${task.transcript_language}` : ''} · 原稿 v{task.transcript_revision || 1}</span>
+      {task.source_url && task.transcript_source !== 'asr' && <button type="button" className="outline compact" disabled={running || retryBusy} onClick={retranscribe}>根据音频重新听写</button>}
+    </div>}
     <div className={`detail-result-grid ${transcriptionComplete ? '' : 'pending-grid'}`}>
       <SourceMedia task={task} displayProgress={displayProgress} mediaRef={mediaRef} mediaSrc={mediaSrc} mediaMode={playbackMode} mediaRetryCount={mediaRetryCount} onMediaError={handleMediaError} onRetryMedia={retryMedia} onCopyLink={copySourceLink} onDownloadVideo={downloadOriginalVideo} downloadBusy={downloadBusy}/>
       <section className="transcript-column-card">
@@ -698,7 +751,7 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
             <div className="ai-tool-buttons">
               <button className={`ai-tool-button summary-tool ${activeTool === 'summary' ? 'active' : ''}`} disabled={running} onClick={task.summary_text ? () => { setActiveTool('summary'); setAction(null) } : startSummary}><Sparkles size={17}/>{task.ai_status === 'summarizing' ? '总结中…' : task.summary_text ? '查看摘要' : 'AI 总结'}</button>
               <button className={`ai-tool-button highlights-tool ${activeTool === 'highlights' ? 'active' : ''}`} disabled={running} onClick={task.highlights?.length ? showHighlights : startHighlights}><WandSparkles size={17}/>{task.ai_status === 'highlighting' ? '提取中…' : task.highlights?.length ? '精彩片段' : '提取精彩片段'}</button>
-              <button className={`ai-tool-button visual-tool ${activeTool === 'visual' ? 'active' : ''}`} disabled={running || !canAnalyzeVisuals || !task.source_available || ['queued','analyzing'].includes(task.visual_status)} onClick={task.visual_analysis?.length && hasVisualStyle ? showVisualAnalysis : startVisualAnalysis}><Film size={17}/>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.visual_analysis?.length ? '查看画面分析' : '分析画面'}</button>
+              <button className={`ai-tool-button visual-tool ${activeTool === 'visual' ? 'active' : ''}`} disabled={running || !canAnalyzeVisuals || (!task.source_available && !retainedSubtitleVideo) || ['queued','analyzing'].includes(task.visual_status)} onClick={task.visual_analysis?.length && hasVisualStyle ? showVisualAnalysis : startVisualAnalysis}><Film size={17}/>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.visual_analysis?.length ? '查看画面分析' : '分析画面'}</button>
               <button className={`ai-tool-button rewrite-tool ${activeTool === 'rewrite' ? 'active' : ''}`} disabled={running} onClick={() => { setActiveTool('rewrite'); setAction(task.rewrite_text ? null : 'rewrite'); setNotice('') }}><PencilLine size={17}/>{task.rewrite_text ? '查看改写稿' : '改写文案'}</button>
               <button className={`ai-tool-button translate-tool ${activeTool === 'translate' ? 'active' : ''}`} disabled={running} onClick={() => { setActiveTool('translate'); setAction(task.translated_text ? null : 'translate'); setNotice('') }}><Languages size={17}/>{task.translated_text ? '查看译文' : '翻译文案'}</button>
             </div>
@@ -710,19 +763,37 @@ function Detail({ taskId, onBack, refresh, onOpen }) {
             <button className="outline compact" onClick={() => copyResultText((search ? visible : segments).map(x => x.text).join('\n'), search ? '搜索结果' : '完整文案')}><Copy size={17}/>{search ? `复制搜索结果 (${visible.length})` : '复制文案'}</button>
             <a className="outline compact" href={`/api/tasks/${task.id}/export/txt`}><Download size={17}/>TXT</a>
             <a className="outline compact" href={`/api/tasks/${task.id}/export/srt`}><Download size={17}/>SRT</a>
-            {dirty && <button className="primary compact" onClick={save}>保存修改</button>}
+            {dirty && <button className="primary compact" disabled={running} onClick={() => save().catch(err => setNotice(err.message))}>保存修改</button>}
           </div>
-          <TranscriptEditor segments={visible} showTimes={showTimes} showSpeakers={showSpeakers} onChange={updateVisible}/>
+          <TranscriptEditor segments={visible} showTimes={showTimes} showSpeakers={showSpeakers} onChange={updateVisible} disabled={running}/>
           <div className="next-results">
+            {task.stale_results?.includes(activeTool) && <div className="notice">听写稿已更新，下面的结果来自较早版本。可以重新生成。</div>}
+            {!running && <div className="result-actions">
+              {activeTool === 'summary' && task.summary_text && <button className="outline compact" onClick={startSummary}>重新生成摘要</button>}
+              {activeTool === 'highlights' && task.highlights?.length > 0 && <button className="outline compact" onClick={startHighlights}>重新提取精彩片段</button>}
+              {activeTool === 'visual' && task.visual_analysis?.length > 0 && <button className="outline compact" onClick={startVisualAnalysis}>重新分析画面</button>}
+              {activeTool === 'rewrite' && task.rewrite_text && <button className="outline compact" onClick={() => setAction('rewrite')}>调整方向再生成</button>}
+              {activeTool === 'translate' && task.translated_text && <button className="outline compact" onClick={() => setAction('translate')}>重新翻译</button>}
+            </div>}
             {running && <div className="ai-running"><LoaderCircle className="spin" size={18}/>{task.ai_message}</div>}
             {task.ai_status === 'failed' && <div className="error-line">{task.ai_message}</div>}
+            {activeTool === 'visual' && task.visual_status === 'failed' && <div className="error-line">{task.visual_message}</div>}
             {activeTool === 'highlights' && (task.highlights?.length > 0 ? <HighlightResults items={task.highlights} onSeek={seekTo}/> : <div className="result-empty">提取的精彩片段会显示在这里。</div>)}
             {activeTool === 'summary' && (task.summary_text ? <div className="rewrite-result"><div className="result-heading"><Sparkles size={18}/><b>AI 文案摘要</b><button onClick={() => copyResultText(task.summary_text, 'AI 摘要')}><Copy size={16}/>复制</button></div><div className="rewrite-output"><MarkdownPreview value={task.summary_text}/></div></div> : <div className="result-empty">生成的摘要会显示在这里。</div>)}
             {activeTool === 'visual' && (task.visual_analysis?.length > 0 ? <VisualResults items={task.visual_analysis} onSeek={seekTo}/> : <div className="result-empty">视频画面分析结果会显示在这里。</div>)}
-            {activeTool === 'rewrite' && (task.rewrite_text ? <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>新口播稿</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => copyResultText(task.rewrite_text, '改写稿')}><Copy size={16}/>复制</button></div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea value={task.rewrite_text} onChange={event => setTask(current => ({...current, rewrite_text: event.target.value}))} spellCheck="false" /> : <MarkdownPreview value={task.rewrite_text}/>}</div></div> : <div className="result-empty">生成的新口播稿会显示在这里。</div>)}
+            {activeTool === 'rewrite' && (task.rewrite_text ? <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>新口播稿</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => copyResultText(rewriteDraft, '改写稿')}><Copy size={16}/>复制</button>{rewriteDirty && <button disabled={running || !rewriteDraft.trim()} onClick={() => saveRewrite().catch(err => setNotice(err.message))}><Save size={16}/>{rewriteSaving ? '保存中…' : '保存改写稿'}</button>}</div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea aria-label="编辑改写稿" value={rewriteDraft} disabled={running} onChange={event => { setRewriteDraft(event.target.value); setRewriteDirty(true); rewriteDirtyRef.current = true }} spellCheck="false" /> : <MarkdownPreview value={rewriteDraft}/>}</div>{rewriteDirty && <small className="draft-warning">修改尚未保存，点击“保存改写稿”后刷新仍会保留。</small>}</div> : <div className="result-empty">生成的新口播稿会显示在这里。</div>)}
             {activeTool === 'translate' && (task.translated_text ? <div className="rewrite-result"><div className="result-heading"><Languages size={18}/><b>{task.translation_language || '翻译结果'}</b><button onClick={() => copyResultText(task.translated_text, '翻译稿')}><Copy size={16}/>复制</button></div><div className="rewrite-output"><MarkdownPreview value={task.translated_text}/></div></div> : <div className="result-empty">选择目标语言后开始翻译，译文会显示在这里。</div>)}
+            <section className="video-questions"><h3>围绕这条视频提问</h3><p>回答依据当前已保存的听写稿，并附原文时间点。每次问答计入一次总结额度。</p>
+              <textarea aria-label="视频问题" value={question} maxLength={1000} onChange={e => setQuestion(e.target.value)} placeholder="例如：这条视频的核心观点是什么？作者举了哪些例子？"/>
+              <button type="button" className="outline compact" disabled={running || !question.trim()} onClick={askQuestion}>根据原文回答</button>
+              {task.latest_answer && <article className="question-answer"><b>{task.latest_answer.question}</b>{task.latest_answer.source_revision !== task.transcript_revision && <small className="draft-warning">回答来自较早版本的听写稿。</small>}<MarkdownPreview value={task.latest_answer.value}/>
+                {task.latest_answer.partial_context && <small>长文已按问题检索相关片段；未引用的内容请结合完整原稿核对。</small>}
+                <div className="answer-citations">{task.latest_answer.citations?.map(c => <button key={c.segment_id} type="button" onClick={() => seekTo(c.start)}><b>{c.start}</b><span>{c.text}</span></button>)}</div>
+              </article>}
+            </section>
+            <WorkspaceHistory taskId={taskId} disabled={running || dirty || rewriteDirty} onRestore={async kind => { await load(); setActiveTool(kind); setNotice('已恢复为新版本') }}/>
             <div className="retention"><span>视频和音频会在 24 小时后自动清理，听写稿会保留。</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除素材</button>}</div>
-          </div>
+                              </div>
         </> : <div className={`transcript-pending ${transcriptionFailed ? 'failed' : ''}`}>
           {transcriptionFailed ? <RotateCcw size={25}/> : <span className="pending-wave"><i/><i/><i/><i/><i/></span>}
           <div><h2>{transcriptionFailed ? '文案提取失败' : task.status === 'completed' ? '正在整理听写结果' : 'AI 正在提取视频文案'}</h2><p>{transcriptionFailed ? task.error : task.status === 'completed' ? '听写已完成，正在整理结果…' : `${task.message}，完成后会显示在这里。`}</p></div>
@@ -912,6 +983,7 @@ function SettingsPage({ onBack, user, adminView = false }) {
   const [planDays, setPlanDays] = useState({})
   const [douyinCookies, setDouyinCookies] = useState(null)
   const [cookieBusy, setCookieBusy] = useState(false)
+  const [providerTestBusy, setProviderTestBusy] = useState(false)
   const [newUser, setNewUser] = useState({username: '', password: ''})
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -1047,14 +1119,16 @@ function SettingsPage({ onBack, user, adminView = false }) {
           </>}
         </div>
       </section>
-      <section id="admin-api-copy" hidden={adminSection !== 'providers'}><div className="settings-section-title"><h2>文案 AI</h2><p>只在用户点击找亮点或复刻改编时调用 Sub2API。</p></div>
+      <section id="admin-api-copy" hidden={adminSection !== 'providers'}><div className="settings-section-title"><h2>文案 AI</h2><p>支持 New API 等兼容接口。总结、问答、翻译、找亮点、画面分析和改写都只由用户主动触发。</p></div>
         <div className="field-grid">
-          <label className="wide">Sub2API Base URL<input value={form.sub2api_base_url} onChange={e => set('sub2api_base_url', e.target.value)} placeholder="http://100.x.x.x:18081/v1"/></label>
-          <label>Sub2API API Key<input type="password" value={form.sub2api_api_key || ''} onChange={e => set('sub2api_api_key', e.target.value)} placeholder={form.sub2api_api_key_configured ? '已配置，留空保持不变' : '请输入专用 API Key'}/></label>
+          <label className="wide">AI 接口地址（Base URL）<input value={form.sub2api_base_url} onChange={e => set('sub2api_base_url', e.target.value)} placeholder="https://你的接口域名/v1"/></label>
+          <label>AI API Key<input type="password" value={form.sub2api_api_key || ''} onChange={e => set('sub2api_api_key', e.target.value)} placeholder={form.sub2api_api_key_configured ? '已配置，留空保持不变' : '请输入专用 API Key'}/></label>
           <label>首选模型<input value={form.llm_primary_model} onChange={e => set('llm_primary_model', e.target.value)} placeholder="Gemini 模型名"/></label>
           <label>备用模型<input value={form.llm_fallback_model} onChange={e => set('llm_fallback_model', e.target.value)} placeholder="GPT 模型名"/></label>
-          <label className="wide">备用 Sub2API API Key（可选）<input type="password" value={form.sub2api_fallback_api_key || ''} onChange={e => set('sub2api_fallback_api_key', e.target.value)} placeholder={form.sub2api_fallback_api_key_configured ? '已配置，留空保持不变' : 'GPT 若属于其他分组，请填写绑定 OpenAI 分组的 Key'}/></label>
+          <label className="wide">备用 API Key（可选）<input type="password" value={form.sub2api_fallback_api_key || ''} onChange={e => set('sub2api_fallback_api_key', e.target.value)} placeholder={form.sub2api_fallback_api_key_configured ? '已配置，留空保持不变' : '填写有权调用备用模型的 Key'}/></label>
         </div>
+        <button type="button" className="outline compact" disabled={providerTestBusy} onClick={async () => { setProviderTestBusy(true); setError(''); setMessage(''); try { const result = await api.testAI(); setMessage(result.message) } catch (err) { setError(err.message) } finally { setProviderTestBusy(false) } }}>{providerTestBusy ? '实际调用测试中…' : '测试已保存的 AI 配置'}</button>
+        <p className="settings-note">测试会发送一条简短请求，验证实际调用；填写了 Key 并不代表接口可用。修改配置后请先保存。</p>
       </section>
       <section id="admin-douyin" hidden={adminSection !== 'system'}><div className="settings-section-title"><h2>抖音下载</h2><p>建议使用小号。可用新版 Chrome 扩展同步 Cookie 与浏览器标识，也可上传 Cookie 文件；不保存账号密码。</p></div>
         <div className="cookie-settings"><div><b>{douyinCookies?.configured ? '已配置抖音 Cookie' : '尚未配置抖音 Cookie'}</b><small>{douyinCookies?.configured ? `更新时间：${new Date(douyinCookies.updated_at).toLocaleString()}${douyinCookies.user_agent_configured ? ' · Chrome 标识已同步' : ' · 请更新扩展同步浏览器标识'}` : '抖音链接可能会提示需要新鲜 Cookie'}</small></div><label className="outline cookie-upload"><Upload size={17}/>选择 Cookie 文件<input type="file" accept=".txt,.cookies,text/plain" onChange={uploadCookies} disabled={cookieBusy}/></label></div>
@@ -1103,12 +1177,17 @@ function SettingsPage({ onBack, user, adminView = false }) {
 
 function App() {
   const [user, setUser] = useState(undefined)
+  const unsavedRef = useRef(false)
+  const onDirtyChange = useCallback(value => { unsavedRef.current = value }, [])
   const [page, setPageState] = useState(() => window.location.pathname.replace(/\/$/, '') === '/admin' ? 'admin' : 'home')
   const setPage = nextPage => {
+    if (unsavedRef.current && !window.confirm('有尚未保存的文案修改，确定离开吗？')) return false
+    unsavedRef.current = false
     setPageState(nextPage)
     const isAdminPath = window.location.pathname.replace(/\/$/, '') === '/admin'
     if (nextPage === 'admin' && !isAdminPath) window.history.pushState({}, '', `/admin${window.location.search}${window.location.hash}`)
     else if (nextPage !== 'admin' && isAdminPath) window.history.pushState({}, '', `/${window.location.search}${window.location.hash}`)
+    return true
   }
   const [lang, setLang] = useState(() => window.localStorage.getItem('tingjian-language') === 'en' ? 'en' : 'zh')
   const [theme, setTheme] = useState(() => ['light', 'dark'].includes(window.localStorage.getItem('tingjian-theme')) ? window.localStorage.getItem('tingjian-theme') : 'system')
@@ -1165,8 +1244,8 @@ function App() {
   }, [user, tasks, refresh])
   if (user === undefined) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
   if (!user) return <Login lang={lang} onLanguageChange={changeLanguage} onLogin={async me => { setUser(me); await refresh() }}/>
-  const open = id => { setSelected(id); setPage('detail') }
-  return <div className="app"><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { await api.logout(); setUser(null) }}/>
+  const open = id => { if (setPage('detail')) setSelected(id) }
+  return <div className="app"><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { if (unsavedRef.current && !window.confirm('有尚未保存的文案修改，确定退出吗？')) return; unsavedRef.current = false; await api.logout(); setUser(null) }}/>
     {page === 'home' && <Home tasks={tasks} refresh={refresh} onOpen={open} lang={lang}/>}
     {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>{lang === 'en' ? 'History' : '历史记录'}</h1><p>{lang === 'en' ? 'Your transcripts, AI analysis, and download tasks are saved here.' : '你的听写稿、AI 分析和下载任务都保存在这里。'}</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full lang={lang}/></main>}
     {page === 'membership' && <MembershipPage lang={lang} onBack={() => setPage('home')}/>}
@@ -1176,7 +1255,7 @@ function App() {
     {page === 'admin' && user.role === 'admin' && <SettingsPage user={user} adminView onBack={() => setPage('home')}/>}
     {page === 'admin' && user.role !== 'admin' && <main className="shell access-denied"><LockKeyhole size={26}/><h1>此页面仅管理员可访问</h1><p>请使用管理员账号登录。</p><button className="outline" onClick={() => setPage('home')}>返回工作台</button></main>}
     {page === 'detail' && selected && (
-      <Detail taskId={selected} onBack={() => { refresh(); setPage('home') }} refresh={refresh} onOpen={open}/>
+      <Detail key={selected} taskId={selected} onBack={() => { refresh(); setPage('home') }} refresh={refresh} onOpen={open} onDirtyChange={onDirtyChange}/>
     )}
     {importing && <div className="notice"><LoaderCircle className="spin" size={16}/>正在导入日报视频…</div>}
     {importError && <div className="notice import-error">{importError}</div>}

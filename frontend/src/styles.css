@@ -881,3 +881,23 @@ a { color: inherit; text-decoration: none; }
 }
 
 .user-plan-row .user-delete { border: 1px solid #e7c9c6; background: #fff; color: #a83d35; border-radius: 7px; padding: 7px 10px; cursor: pointer; white-space: nowrap; }.user-plan-row .user-delete:hover:not(:disabled) { background: #fff0ef; color: #862c25; }.user-plan-row .user-delete:disabled { opacity: .5; cursor: not-allowed; }
+
+:root { --surface: #fff; --border: var(--line); }
+:root[data-theme="dark"] { --surface: #202024; }
+.extraction-mode { display: grid; gap: 7px; margin: 8px 0 12px; font-size: 13px; text-align: left; }
+.extraction-mode select, .version-browser select { max-width: 100%; padding: 10px 12px; border: 1px solid var(--border, #e6e2dc); border-radius: 9px; background: var(--surface, #fff); color: inherit; }
+.extraction-mode small, .version-browser p, .video-questions p { font-size: 12px; color: var(--muted, #77736c); line-height: 1.7; }
+.transcript-provenance { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 0 18px; font-size: 13px; color: var(--muted, #77736c); }
+.result-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.draft-warning { display: block; padding: 10px 14px; font-size: 12px; color: #956514; line-height: 1.6; }
+.workspace-history, .video-questions { border-top: 1px solid var(--border, #e6e2dc); padding-top: 20px; margin-top: 20px; }
+.video-questions h3 { margin: 0 0 8px; font-size: 16px; }
+.video-questions textarea { width: 100%; min-height: 86px; resize: vertical; border: 1px solid var(--border, #e6e2dc); border-radius: 10px; padding: 12px; margin: 10px 0; font: inherit; color: inherit; background: var(--surface, #fff); }
+.question-answer { margin-top: 18px; padding: 16px; border: 1px solid var(--border, #e6e2dc); border-radius: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.answer-citations { display: grid; gap: 8px; margin-top: 12px; }
+.answer-citations button { display: flex; text-align: left; gap: 12px; padding: 10px; border: 1px solid var(--border, #e6e2dc); background: transparent; border-radius: 8px; color: inherit; cursor: pointer; font: inherit; }
+.answer-citations button b { flex-shrink: 0; font-size: 12px; }
+.answer-citations button span { font-size: 12px; }
+.version-browser { display: grid; gap: 12px; margin-top: 12px; }
+.version-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--border, #e6e2dc); border-radius: 10px; font: inherit; line-height: 1.8; font-size: 13px; }
+@media (max-width: 600px) { .answer-citations button { flex-direction: column; gap: 4px; } .transcript-provenance { align-items: flex-start; } }

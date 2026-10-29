@@ -5,15 +5,16 @@ import re
 import secrets
 import shutil
 import uuid
+import math
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, desc, func, inspect, select, text
 from sqlalchemy.orm import Session
 
@@ -21,8 +22,9 @@ from .auth import create_session, current_user, hash_password, seed_admin, verif
 from .billing import check_can_submit, ensure_entitlements, entitlement_dict, get_entitlement, month_bounds, reserve_ai_use, settle_ai_use
 from .config import settings
 from .database import Base, SessionLocal, engine, get_db
-from .jobs import analyze_visual_task, cleanup_expired_sources, download_source_task, highlight_task, rewrite_task, summarize_task, translate_task, transcribe_task
-from .models import AIFeatureUsage, BillingOrder, Plan, Task, UsageLedger, User, UserAPIKey, UserEntitlement, utcnow
+from .jobs import analyze_visual_task, cleanup_expired_sources, download_source_task, highlight_task, question_task, rewrite_task, summarize_task, translate_task, transcribe_task
+from .models import AIFeatureUsage, BillingOrder, Plan, Task, UsageLedger, User, UserAPIKey, UserEntitlement, WorkspaceVersion, utcnow
+from .workspace import RESULT_FIELDS, save_result
 from .provider_config import provider_config, public_provider_config, update_provider_config
 from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, _direct_media_suffix, delete_source, ensure_cover_image, ensure_remote_cover_image, extract_video_url, is_direct_media_url, is_direct_video_url, media_kind, source_platform_label
 from .worker import enqueue
@@ -35,14 +37,26 @@ class LoginBody(BaseModel):
 
 class UrlBody(BaseModel):
     url: str
+    extraction_mode: str = "prefer_subtitles"
 
 
 class BatchUrlsBody(BaseModel):
     urls: list[str]
+    extraction_mode: str = "prefer_subtitles"
 
 
 class TranscriptBody(BaseModel):
     segments: list[dict]
+    revision: int | None = None
+
+
+class RewriteEditBody(BaseModel):
+    text: str = Field(min_length=1, max_length=200000)
+    base_version: str | None = None
+
+
+class QuestionBody(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
 
 
 class RewriteBody(BaseModel):
@@ -146,6 +160,11 @@ def _ensure_schema():
             "summary_text": "TEXT",
             "translated_text": "TEXT",
             "translation_language": "VARCHAR(40)",
+            "extraction_mode": "VARCHAR(24) NOT NULL DEFAULT 'prefer_subtitles'",
+            "transcript_source": "VARCHAR(24) NOT NULL DEFAULT 'asr'",
+            "transcript_language": "VARCHAR(40)",
+            "transcript_revision": "INTEGER NOT NULL DEFAULT 1",
+            "result_revisions": "JSON",
         },
         "plans": {"tier": "VARCHAR(20) NOT NULL DEFAULT 'standard'", "term_days": "INTEGER NOT NULL DEFAULT 30",
                   "ai_summary_limit": "INTEGER NOT NULL DEFAULT 0", "ai_highlights_limit": "INTEGER NOT NULL DEFAULT 0",
@@ -177,6 +196,12 @@ def _source_is_retained(task: Task) -> bool:
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=now.tzinfo)
     return deadline > now
+
+
+def utc_iso(value):
+    if value is None:
+        return None
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
 
 
 def task_dict(task: Task, detail: bool = False):
@@ -211,6 +236,10 @@ def task_dict(task: Task, detail: bool = False):
         "duration": task.duration, "language": task.language, "status": task.status,
         "progress": task.progress, "message": task.message, "error": task.error,
         "asr_provider": task.asr_provider, "ai_status": task.ai_status,
+        "extraction_mode": task.extraction_mode, "transcript_source": task.transcript_source,
+        "transcript_language": task.transcript_language, "transcript_revision": task.transcript_revision or 1,
+        "stale_results": [kind for kind, field in RESULT_FIELDS.items() if getattr(task, field)
+            and (task.result_revisions or {}).get(kind, 1) != (task.transcript_revision or 1)],
         "ai_message": task.ai_message,
         "source_available": bool(task.media_path) if task.task_kind == "download" else bool(
             source_exists or playback_url or fallback_video
@@ -225,9 +254,9 @@ def task_dict(task: Task, detail: bool = False):
         "media_kind": current_media_kind,
         "cover_available": bool((cover_path.is_file() and cover_path.stat().st_size > 0) or can_generate_cover),
         "audio_available": bool((current_media_kind == "audio" and source_exists) or (task_dir / "audio" / "download.mp3").is_file()),
-        "source_delete_at": task.source_delete_at.isoformat() if task.source_delete_at else None,
+        "source_delete_at": utc_iso(task.source_delete_at),
         "source_platform": source_platform_label(task.source_url) if task.source_type == "url" else "本地文件",
-        "created_at": task.created_at.isoformat(), "updated_at": task.updated_at.isoformat(),
+        "created_at": utc_iso(task.created_at), "updated_at": utc_iso(task.updated_at),
     }
     if detail:
         data.update({
@@ -248,8 +277,13 @@ def owned_task(task_id: str, user: User, db: Session) -> Task:
     return task
 
 
-def owned_transcription_task(task_id: str, user: User, db: Session) -> Task:
-    task = owned_task(task_id, user, db)
+def owned_transcription_task(task_id: str, user: User, db: Session, *, lock=False) -> Task:
+    if lock:
+        task = db.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id).with_for_update())
+        if not task:
+            raise HTTPException(404, "任务不存在")
+    else:
+        task = owned_task(task_id, user, db)
     if task.task_kind != "transcription":
         raise HTTPException(409, "此操作只适用于听写任务")
     return task
@@ -754,6 +788,8 @@ async def upload_task(
 
 @app.post("/api/tasks/url")
 def url_task(body: UrlBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if body.extraction_mode not in {"prefer_subtitles", "asr"}:
+        raise HTTPException(400, "请选择字幕优先或重新听写")
     try:
         url = extract_video_url(body.url)
     except ValueError as exc:
@@ -765,6 +801,7 @@ def url_task(body: UrlBody, user: User = Depends(current_user), db: Session = De
         id=task_id, user_id=user.id, title="网络视频", source_type="url", source_url=url,
         source_playback_url=url if is_direct_media_url(url) else None,
         language="auto", asr_provider=provider_config()["asr_provider"],
+        extraction_mode=body.extraction_mode,
     )
     db.add(task)
     db.commit()
@@ -774,6 +811,8 @@ def url_task(body: UrlBody, user: User = Depends(current_user), db: Session = De
 
 @app.post("/api/tasks/batch")
 def batch_url_tasks(body: BatchUrlsBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if body.extraction_mode not in {"prefer_subtitles", "asr"}:
+        raise HTTPException(400, "请选择字幕优先或重新听写")
     if not body.urls or len(body.urls) > 20:
         raise HTTPException(400, "每批请提交 1 至 20 条视频链接")
     urls = []
@@ -797,7 +836,7 @@ def batch_url_tasks(body: BatchUrlsBody, user: User = Depends(current_user), db:
             task_dirs.append(task_dir)
             task = Task(id=task_id, user_id=user.id, title="网络视频", source_type="url", source_url=url,
                         source_playback_url=url if is_direct_media_url(url) else None,
-                        language="auto", asr_provider=provider_config()["asr_provider"])
+                        language="auto", asr_provider=provider_config()["asr_provider"], extraction_mode=body.extraction_mode)
             db.add(task)
             db.flush()
             tasks.append(task)
@@ -840,7 +879,15 @@ def create_download_task(body: UrlBody, user: User = Depends(current_user), db: 
 
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return task_dict(owned_task(task_id, user, db), detail=True)
+    task = owned_task(task_id, user, db)
+    data = task_dict(task, detail=True)
+    answer = db.scalar(select(WorkspaceVersion).where(WorkspaceVersion.task_id == task.id,
+        WorkspaceVersion.kind == "answer").order_by(desc(WorkspaceVersion.created_at), desc(WorkspaceVersion.id)).limit(1))
+    data["latest_answer"] = {**answer.content, "source_revision": answer.source_revision} if answer else None
+    latest_rewrite = db.scalar(select(WorkspaceVersion.id).where(WorkspaceVersion.task_id == task.id,
+        WorkspaceVersion.kind == "rewrite").order_by(desc(WorkspaceVersion.created_at), desc(WorkspaceVersion.id)).limit(1))
+    data["rewrite_version"] = latest_rewrite
+    return data
 
 
 @app.post("/api/tasks/{task_id}/retry")
@@ -887,16 +934,109 @@ def retry_task(task_id: str, user: User = Depends(current_user), db: Session = D
 
 @app.patch("/api/tasks/{task_id}/transcript")
 def save_transcript(task_id: str, body: TranscriptBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_transcription_task(task_id, user, db)
-    task.segments = body.segments
-    task.transcript_text = "\n".join(str(item.get("text", "")).strip() for item in body.segments if item.get("text"))
+    task = owned_transcription_task(task_id, user, db, lock=True)
+    if task.status != "completed" or task.ai_status not in {"idle", "failed"} or task.visual_status not in {"idle", "completed", "failed"}:
+        raise HTTPException(409, "请等待当前任务完成后保存文案")
+    if body.revision is not None and body.revision != (task.transcript_revision or 1):
+        raise HTTPException(409, "文案已在其他页面更新，请刷新后再编辑")
+    if len(body.segments) > 50000 or sum(len(str(s.get("text", ""))) for s in body.segments) > 1000000:
+        raise HTTPException(400, "文案内容过长")
+    segments = []
+    for item in body.segments:
+        try:
+            start, end = float(item.get("start_seconds", 0)), float(item.get("end_seconds", 0))
+            if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end < start:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise HTTPException(400, "文案时间码无效")
+        def clock_value(value):
+            seconds = int(value)
+            return f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+        segment = {"text": str(item.get("text", "")), "start_seconds": start, "end_seconds": end,
+            "start": clock_value(start), "end": clock_value(end)}
+        if item.get("speaker"):
+            segment["speaker"] = str(item["speaker"])[:80]
+        segments.append(segment)
+    task.segments = segments
+    task.transcript_text = "\n".join(item["text"].strip() for item in segments if item["text"].strip())
+    task.transcript_revision = (task.transcript_revision or 1) + 1
     db.commit()
     return task_dict(task, detail=True)
 
 
+@app.patch("/api/tasks/{task_id}/rewrite")
+def save_rewrite(task_id: str, body: RewriteEditBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = owned_transcription_task(task_id, user, db, lock=True)
+    if task.ai_status not in {"idle", "failed"}:
+        raise HTTPException(409, "请等待 AI 处理完成后保存")
+    if not body.text.strip():
+        raise HTTPException(400, "改写稿不能为空")
+    latest = db.scalar(select(WorkspaceVersion.id).where(WorkspaceVersion.task_id == task.id,
+        WorkspaceVersion.kind == "rewrite").order_by(desc(WorkspaceVersion.created_at), desc(WorkspaceVersion.id)).limit(1))
+    if latest != body.base_version:
+        raise HTTPException(409, "改写稿已有新版本，请刷新后再编辑")
+    version = save_result(db, task, "rewrite", {"value": body.text}, origin="edited",
+        source_revision=(task.result_revisions or {}).get("rewrite", 1))
+    db.commit()
+    return {"rewrite_text": task.rewrite_text, "rewrite_version": version.id}
+
+
+@app.get("/api/tasks/{task_id}/versions")
+def list_versions(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    owned_transcription_task(task_id, user, db)
+    versions = db.scalars(select(WorkspaceVersion).where(WorkspaceVersion.task_id == task_id)
+        .order_by(desc(WorkspaceVersion.created_at), desc(WorkspaceVersion.id)).limit(50)).all()
+    return [{"id": v.id, "kind": v.kind, "origin": v.origin, "source_revision": v.source_revision,
+        "created_at": utc_iso(v.created_at), "preview": str(v.content.get("question") or v.content.get("value") or "")[:120]} for v in versions]
+
+
+@app.get("/api/tasks/{task_id}/versions/{version_id}")
+def get_version(task_id: str, version_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    owned_transcription_task(task_id, user, db)
+    version = db.scalar(select(WorkspaceVersion).where(WorkspaceVersion.id == version_id, WorkspaceVersion.task_id == task_id))
+    if not version:
+        raise HTTPException(404, "版本不存在")
+    return {"id": version.id, "kind": version.kind, "content": version.content, "source_revision": version.source_revision}
+
+
+@app.post("/api/tasks/{task_id}/versions/{version_id}/restore")
+def restore_version(task_id: str, version_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = owned_transcription_task(task_id, user, db, lock=True)
+    if task.ai_status not in {"idle", "failed"} or task.visual_status not in {"idle", "completed", "failed"}:
+        raise HTTPException(409, "请等待当前 AI 任务完成")
+    version = db.scalar(select(WorkspaceVersion).where(WorkspaceVersion.id == version_id, WorkspaceVersion.task_id == task_id))
+    if not version or version.kind not in RESULT_FIELDS:
+        raise HTTPException(404, "该版本不支持恢复")
+    save_result(db, task, version.kind, version.content, origin="restored", source_revision=version.source_revision)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/questions")
+def start_question(task_id: str, body: QuestionBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = owned_transcription_task(task_id, user, db, lock=True)
+    if not body.question.strip():
+        raise HTTPException(400, "请输入问题")
+    if task.status != "completed":
+        raise HTTPException(409, "请先完成听写")
+    if task.ai_status not in {"idle", "failed"}:
+        raise HTTPException(409, "已有 AI 任务正在进行")
+    reserve_ai_use(db, user, task.id, "summary")
+    task.ai_status, task.ai_message = "queued", "视频问答已排队（计入总结额度）"
+    db.commit()
+    try:
+        enqueue(question_task, task.id, body.question.strip())
+    except Exception:
+        settle_ai_use(db, task.id, "summary", False)
+        task.ai_status, task.ai_message = "failed", "视频问答暂时无法排队，请重试"
+        db.commit()
+        raise HTTPException(503, task.ai_message)
+    return {"ok": True}
+
+
 @app.post("/api/tasks/{task_id}/highlights")
 def start_highlights(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_transcription_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db, lock=True)
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
     if task.ai_status not in {"idle", "failed"}:
@@ -915,7 +1055,7 @@ def start_highlights(task_id: str, user: User = Depends(current_user), db: Sessi
 
 @app.post("/api/tasks/{task_id}/summary")
 def start_summary(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_transcription_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db, lock=True)
     if task.status != "completed": raise HTTPException(409, "请先完成听写")
     if task.ai_status not in {"idle", "failed"}: raise HTTPException(409, "已有 AI 任务正在进行")
     reserve_ai_use(db, user, task.id, "summary")
@@ -932,7 +1072,7 @@ def start_summary(task_id: str, user: User = Depends(current_user), db: Session 
 
 @app.post("/api/tasks/{task_id}/translate")
 def start_translation(task_id: str, body: TranslateBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_transcription_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db, lock=True)
     language = body.language.strip()
     if language not in {"英语", "简体中文", "繁體中文", "日语", "韩语", "西班牙语", "法语"}:
         raise HTTPException(400, "请选择受支持的目标语言")
@@ -952,13 +1092,12 @@ def start_translation(task_id: str, body: TranslateBody, user: User = Depends(cu
 
 @app.post("/api/tasks/{task_id}/visual-analysis")
 def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_transcription_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db, lock=True)
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
-    has_remote_video = task.source_type == "url" and bool(task.source_url) and bool(task.media_path or task.source_playback_url) and (
-        task.source_playback_kind == "video"
-        or Path(urlparse(task.source_url).path).suffix.lower() in VIDEO_SUFFIXES
-    )
+    has_remote_video = task.source_type == "url" and bool(task.source_url) and _source_is_retained(task) and (
+        task.source_playback_kind == "video" or (task.source_delete_at is not None and task.transcript_source in {"author_subtitles", "automatic_subtitles"})
+        or Path(urlparse(task.source_url).path).suffix.lower() in VIDEO_SUFFIXES)
     if media_kind(task.media_path) == "audio" and not has_remote_video:
         raise HTTPException(409, "画面分析仅支持视频文件")
     if (not task.media_path or not Path(task.media_path).exists()) and not has_remote_video:
@@ -982,7 +1121,7 @@ def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: 
 
 @app.post("/api/tasks/{task_id}/rewrite")
 def start_rewrite(task_id: str, body: RewriteBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    task = owned_transcription_task(task_id, user, db)
+    task = owned_transcription_task(task_id, user, db, lock=True)
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
     if task.ai_status not in {"idle", "failed"}:
@@ -997,6 +1136,24 @@ def start_rewrite(task_id: str, body: RewriteBody, user: User = Depends(current_
         db.commit()
         raise HTTPException(503, task.ai_message)
     return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/retranscribe")
+def retranscribe(task_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = owned_transcription_task(task_id, user, db)
+    if task.source_type != "url" or not task.source_url:
+        raise HTTPException(409, "请重新上传本地素材以听写")
+    return url_task(UrlBody(url=task.source_url, extraction_mode="asr"), user, db)
+
+
+@app.post("/api/settings/providers/test")
+def test_ai_provider(user: User = Depends(admin_only)):
+    from .services.llm import _call
+    try:
+        _call([{"role": "user", "content": "连接测试，请只回复 OK。"}])
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc))
+    return {"ok": True, "checked_at": utcnow().isoformat(), "message": "AI 实际调用成功"}
 
 
 @app.delete("/api/tasks/{task_id}/source")
@@ -1021,6 +1178,7 @@ def delete_task(task_id: str, user: User = Depends(current_user), db: Session = 
     task_dir = settings.data_dir / "tasks" / task.id
     delete_source(task.media_path)
     shutil.rmtree(task_dir, ignore_errors=True)
+    db.execute(delete(WorkspaceVersion).where(WorkspaceVersion.task_id == task.id))
     db.delete(task)
     db.commit()
     return {"ok": True}
