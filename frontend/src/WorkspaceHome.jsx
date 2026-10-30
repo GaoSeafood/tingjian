@@ -17,7 +17,6 @@ export default function WorkspaceHome({ tasks, refresh, onOpen, onHistory, rende
   const [file, setFile] = useState(null)
   const [input, setInput] = useState('')
   const [batch, setBatch] = useState(false)
-  const [extractionMode, setExtractionMode] = useState('prefer_subtitles')
   const [drag, setDrag] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -38,10 +37,10 @@ export default function WorkspaceHome({ tasks, refresh, onOpen, onHistory, rende
       else if (file) id = (await api.upload(file)).id
       else if (batch) {
         const urls = input.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
-        const result = await api.batch(urls, extractionMode)
+        const result = await api.batch(urls, 'prefer_subtitles')
         id = result.tasks[0]?.id
         if (!id) throw new Error(en ? 'No tasks were created. Please check your links.' : '未创建任务，请检查链接后重试。')
-      } else id = (await api.url(input, extractionMode)).id
+      } else id = (await api.url(input, 'prefer_subtitles')).id
       await refresh(); onOpen(id)
     } catch (err) { setError(err.message) }
     finally { submitting.current = false; setBusy(false) }
@@ -76,7 +75,7 @@ export default function WorkspaceHome({ tasks, refresh, onOpen, onHistory, rende
           </div>
           <input ref={fileRef} type="file" accept="audio/*,video/*,.mkv,.webm,.m4a,.flac,.ogg" hidden disabled={busy || download} aria-label={en ? 'Choose audio or video' : '选择音视频文件'} onChange={event => { choose(event.target.files[0]); event.target.value = '' }}/>
         </div>
-        {!download && <div className="workspace-input-options"><div className="link-options"><label><input type="checkbox" checked={batch} disabled={busy || !!file} onChange={event => setBatch(event.target.checked)}/>{en ? 'Multiple links' : '批量听写'}</label>{!file && <label><span>{en ? 'Extraction' : '提取方式'}</span><select aria-label="文案提取方式" value={extractionMode} disabled={busy} onChange={event => setExtractionMode(event.target.value)}><option value="prefer_subtitles">{en ? 'Subtitles first' : '字幕优先，无字幕时听写'}</option><option value="asr">{en ? 'Always transcribe audio' : '始终根据音频听写'}</option></select></label>}</div><p className="workspace-form-note">{file ? `${sizeLabel(file.size)} · ${en ? 'File selected. Start transcription when ready.' : '文件已选好，点击开始听写后上传。'}` : (en ? 'Supports audio and video files, including MP4, MOV, MP3 and WAV.' : '支持 MP4、MOV、MP3、WAV 等音视频文件。')}</p></div>}
+        {!download && <div className="workspace-input-options"><div className="link-options"><label><input type="checkbox" checked={batch} disabled={busy || !!file} onChange={event => setBatch(event.target.checked)}/>{en ? 'Multiple links' : '批量听写'}</label></div><p className="workspace-form-note">{file ? `${sizeLabel(file.size)} · ${en ? 'File selected. Start transcription when ready.' : '文件已选好，点击开始听写后上传。'}` : (en ? 'Subtitles are used first; audio transcription starts only when no usable subtitles are available.' : '默认优先使用字幕，没有可用字幕时才进行语音听写。')}</p></div>}
         {download && <p className="workspace-form-note">{en ? 'Downloads only. Transcription does not start automatically.' : '只下载原视频，不会自动听写。原文件按保留策略自动清理。'}</p>}
         {error && <div className="error-line" role="alert">{error}</div>}
       </form>
