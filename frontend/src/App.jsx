@@ -675,6 +675,7 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
             </div>}
             {running && <div className="ai-running"><LoaderCircle className="spin" size={18}/>{task.ai_message}</div>}
             {task.ai_status === 'failed' && <div className="error-line">{task.ai_message}</div>}
+            {activeTool === 'visual' && task.visual_status === 'failed' && <div className="error-line">{task.visual_message}</div>}
             {activeTool === 'highlights' && (task.highlights?.length > 0 ? <HighlightResults items={task.highlights} onSeek={seekTo}/> : <div className="result-empty">提取的精彩片段会显示在这里。</div>)}
             {activeTool === 'summary' && (task.summary_text ? <div className="rewrite-result"><div className="result-heading"><Sparkles size={18}/><b>AI 文案摘要</b><button onClick={() => copyResultText(task.summary_text, 'AI 摘要')}><Copy size={16}/>复制</button></div><div className="rewrite-output"><MarkdownPreview value={task.summary_text}/></div></div> : <div className="result-empty">生成的摘要会显示在这里。</div>)}
             {activeTool === 'visual' && (task.visual_analysis?.length > 0 ? <VisualResults items={task.visual_analysis} onSeek={seekTo}/> : <div className="result-empty">视频画面分析结果会显示在这里。</div>)}
