@@ -14,15 +14,12 @@ def _call(messages: list[dict], *, expect_json=False) -> str:
         raise RuntimeError("服务器尚未配置文案 AI 接口")
     errors = []
     providers = [(cfg["llm_primary_model"], cfg["sub2api_api_key"])]
-    # Sub2API keys are bound to a group. Do not send a GPT model through the
-    # Gemini-group key when no dedicated fallback key was configured.
-    if cfg["sub2api_fallback_api_key"]:
+    if cfg["sub2api_fallback_api_key"] and cfg["llm_fallback_model"]:
         providers.append((cfg["llm_fallback_model"], cfg["sub2api_fallback_api_key"]))
     for model, api_key in providers:
         if not model:
             errors.append("未配置模型")
             continue
-        response = None
         for attempt in range(2):
             try:
                 response = requests.post(
@@ -34,34 +31,31 @@ def _call(messages: list[dict], *, expect_json=False) -> str:
             except requests.RequestException:
                 errors.append(f"{model}: 请求超时或网络连接失败")
                 break
-            if response.status_code not in {429, 500, 502, 503, 504} or attempt == 1:
-                break
-            time.sleep(0.5)
-        if response is None:
-            continue
-        if response.status_code == 200:
-            try:
-                choice = response.json()["choices"][0]
-                content = choice["message"]["content"]
-                if not isinstance(content, str) or not content.strip() or choice.get("finish_reason") == "length":
-                    raise ValueError("结果为空或不完整")
-                if expect_json:
-                    _json(content)
-                return content
-            except (KeyError, IndexError, TypeError, ValueError) as exc:
-                errors.append(f"{model}: 返回格式异常（{exc}）")
+            if response.status_code == 200:
+                try:
+                    choice = response.json()["choices"][0]
+                    content = choice["message"]["content"]
+                    if not isinstance(content, str) or not content.strip() or choice.get("finish_reason") == "length":
+                        raise ValueError("结果为空或不完整")
+                    if expect_json:
+                        _json(content)
+                    return content
+                except (KeyError, IndexError, TypeError, ValueError):
+                    if attempt == 0:
+                        time.sleep(0.5)
+                        continue
+                    errors.append(f"{model}: 返回内容为空、不完整或格式异常，请重试")
+                    break
+            if response.status_code in {429, 500, 502, 503, 504} and attempt == 0:
+                time.sleep(0.5)
                 continue
-        # Upstream messages can echo keys, signed URLs and internal addresses.
-        reasons = {401: "认证失败，请检查接口地址与密钥", 403: "当前密钥无模型访问权限",
-                   402: "接口额度不足", 400: "接口拒绝请求，请检查模型和计费配置", 404: "模型或接口地址不存在",
-                   429: "接口繁忙或触发限流"}
-        errors.append(f"{model}: HTTP {response.status_code}，{reasons.get(response.status_code, '上游服务暂时不可用')}")
-    joined = "；".join(errors)
-    if "INSUFFICIENT_BALANCE" in joined:
-        raise RuntimeError("Sub2API API Key 余额不足。后台账号测试成功不等于 API Key 有额度，请为该 Key 所属用户充值内部余额或分配有效订阅。")
-    if "model_not_found" in joined or "模型" in joined and "supported" in joined:
-        raise RuntimeError(f"Sub2API 模型不可用，请在对应分组中确认模型名称：{joined}")
-    raise RuntimeError(f"AI 调用失败：{joined}")
+            # Upstream errors can echo keys or internal addresses. Never relay their body.
+            reasons = {401: "认证失败，请检查接口地址与密钥", 403: "当前密钥无模型访问权限",
+                       402: "接口额度不足", 400: "接口拒绝请求，请检查模型和计费配置",
+                       404: "模型或接口地址不存在", 429: "接口繁忙或触发限流"}
+            errors.append(f"{model}: HTTP {response.status_code}，{reasons.get(response.status_code, '上游服务暂时不可用')}")
+            break
+    raise RuntimeError("AI 调用失败：" + "；".join(errors))
 
 
 def _json(text: str):

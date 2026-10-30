@@ -75,6 +75,12 @@ export const api = {
     form.append('cookies', file)
     return request('/api/settings/douyin-cookies', { method: 'POST', body: form })
   },
+  youtubeCookieStatus: () => request('/api/settings/youtube-cookies'),
+  deleteYoutubeCookies: () => request('/api/settings/youtube-cookies', { method: 'DELETE' }),
+  uploadYoutubeCookies: (file) => {
+    const form = new FormData(); form.append('cookies', file)
+    return request('/api/settings/youtube-cookies', { method: 'POST', body: form })
+  },
   task: (id) => request(`/api/tasks/${id}`),
   refreshPlayback: (id) => request(`/api/tasks/${id}/refresh-playback`, { method: 'POST' }),
   preparePlaybackVideo: (id) => request(`/api/tasks/${id}/prepare-playback-video`, { method: 'POST' }),

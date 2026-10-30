@@ -7,7 +7,7 @@ import shutil
 import uuid
 import math
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -26,6 +26,7 @@ from .jobs import analyze_visual_task, cleanup_expired_sources, download_source_
 from .models import AIFeatureUsage, BillingOrder, Plan, Task, UsageLedger, User, UserAPIKey, UserEntitlement, WorkspaceVersion, utcnow
 from .workspace import RESULT_FIELDS, save_result
 from .provider_config import provider_config, public_provider_config, update_provider_config
+from .services import youtube_access
 from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, _direct_media_suffix, delete_source, ensure_cover_image, ensure_remote_cover_image, extract_video_url, is_direct_media_url, is_direct_video_url, media_kind, source_platform_label
 from .worker import enqueue
 
@@ -198,6 +199,12 @@ def _source_is_retained(task: Task) -> bool:
     return deadline > now
 
 
+def utc_iso(value):
+    if value is None:
+        return None
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
+
+
 def task_dict(task: Task, detail: bool = False):
     playback_url = task.source_playback_url
     source_path = Path(task.media_path) if task.media_path else None
@@ -248,9 +255,9 @@ def task_dict(task: Task, detail: bool = False):
         "media_kind": current_media_kind,
         "cover_available": bool((cover_path.is_file() and cover_path.stat().st_size > 0) or can_generate_cover),
         "audio_available": bool((current_media_kind == "audio" and source_exists) or (task_dir / "audio" / "download.mp3").is_file()),
-        "source_delete_at": task.source_delete_at.isoformat() if task.source_delete_at else None,
+        "source_delete_at": utc_iso(task.source_delete_at),
         "source_platform": source_platform_label(task.source_url) if task.source_type == "url" else "本地文件",
-        "created_at": task.created_at.isoformat(), "updated_at": task.updated_at.isoformat(),
+        "created_at": utc_iso(task.created_at), "updated_at": utc_iso(task.updated_at),
     }
     if detail:
         data.update({
@@ -724,6 +731,29 @@ async def upload_douyin_cookies(
     }
 
 
+@app.get("/api/settings/youtube-cookies")
+def get_youtube_cookie_status(user: User = Depends(admin_only)):
+    return youtube_access.access_status()
+
+
+@app.post("/api/settings/youtube-cookies")
+async def upload_youtube_cookies(cookies: UploadFile = File(...), user_agent: str = Form(""), user: User = Depends(admin_only)):
+    raw = await cookies.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise HTTPException(413, "Cookie 文件不能超过 1MB")
+    try:
+        youtube_access.save_cookies(raw, user_agent)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return youtube_access.access_status()
+
+
+@app.delete("/api/settings/youtube-cookies")
+def delete_youtube_cookies(user: User = Depends(admin_only)):
+    youtube_access.delete_cookies()
+    return youtube_access.access_status()
+
+
 @app.get("/api/tasks")
 def list_tasks(user: User = Depends(current_user), db: Session = Depends(get_db)):
     # Repair legacy tasks and missed delayed jobs whenever history is opened.
@@ -981,7 +1011,7 @@ def list_versions(task_id: str, user: User = Depends(current_user), db: Session 
     versions = db.scalars(select(WorkspaceVersion).where(WorkspaceVersion.task_id == task_id)
         .order_by(desc(WorkspaceVersion.created_at), desc(WorkspaceVersion.id)).limit(50)).all()
     return [{"id": v.id, "kind": v.kind, "origin": v.origin, "source_revision": v.source_revision,
-        "created_at": v.created_at.isoformat(), "preview": str(v.content.get("question") or v.content.get("value") or "")[:120]} for v in versions]
+        "created_at": utc_iso(v.created_at), "preview": str(v.content.get("question") or v.content.get("value") or "")[:120]} for v in versions]
 
 
 @app.get("/api/tasks/{task_id}/versions/{version_id}")
@@ -1090,7 +1120,7 @@ def start_visual_analysis(task_id: str, user: User = Depends(current_user), db: 
     if task.status != "completed":
         raise HTTPException(409, "请先完成听写")
     has_remote_video = task.source_type == "url" and bool(task.source_url) and _source_is_retained(task) and (
-        task.source_playback_kind == "video" or task.transcript_source in {"author_subtitles", "automatic_subtitles"}
+        task.source_playback_kind == "video" or (task.source_delete_at is not None and task.transcript_source in {"author_subtitles", "automatic_subtitles"})
         or Path(urlparse(task.source_url).path).suffix.lower() in VIDEO_SUFFIXES)
     if media_kind(task.media_path) == "audio" and not has_remote_video:
         raise HTTPException(409, "画面分析仅支持视频文件")

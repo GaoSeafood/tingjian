@@ -75,6 +75,15 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/tasks/test-task").json()["rewrite_text"], "旧改写稿")
         self.assertEqual(len(self.client.get("/api/tasks/test-task/versions").json()), 3)
 
+    def test_rapid_rewrite_saves_keep_the_latest_version(self):
+        with patch("app.workspace.utcnow", return_value=utcnow()):
+            first = self.client.patch("/api/tasks/test-task/rewrite", json={"text": "第一份修改"}).json()
+            second = self.client.patch("/api/tasks/test-task/rewrite", json={"text": "第二份修改", "base_version": first["rewrite_version"]})
+        self.assertEqual(second.status_code, 200)
+        current = self.client.get("/api/tasks/test-task").json()
+        self.assertEqual(current["rewrite_version"], second.json()["rewrite_version"])
+        self.assertEqual(current["rewrite_text"], "第二份修改")
+
     def test_versions_and_ai_actions_stay_with_owner(self):
         self.client.patch("/api/tasks/test-task/rewrite", json={"text": "新稿"})
         version = self.client.get("/api/tasks/test-task/versions").json()[0]["id"]
@@ -148,6 +157,20 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(task.transcript_source, "author_subtitles")
             self.assertEqual(task.segments, SEGMENTS)
 
+    def test_youtube_session_opt_in_comes_from_task_owner_role(self):
+        for role in ("user", "admin"):
+            with self.subTest(role=role):
+                with self.Session() as db:
+                    db.get(User, 1).role = role
+                    db.get(Task, "test-task").status = "queued"
+                    db.commit()
+                with patch("app.jobs.SessionLocal", self.Session), patch("app.jobs.fetch_subtitles", return_value=None) as captions, \
+                     patch("app.jobs.download_video", side_effect=RuntimeError("synthetic failure")) as download, \
+                     patch("app.jobs._schedule_cleanup"):
+                    jobs.transcribe_task("test-task")
+                self.assertEqual(captions.call_args.kwargs["use_youtube_cookies"], role == "admin")
+                self.assertEqual(download.call_args.kwargs["use_youtube_cookies"], role == "admin")
+
     def test_subtitle_failure_falls_back_to_asr(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio = Path(tmp) / "source.mp3"; audio.write_bytes(b"synthetic")
@@ -213,9 +236,10 @@ class ModelReliabilityTests(unittest.TestCase):
 
     def test_malformed_json_tries_configured_fallback(self):
         with patch("app.services.llm.provider_config", return_value=self.CONFIG), \
-             patch("app.services.llm.requests.post", side_effect=[self.response("invalid json"), self.response('{"ok":true}')]) as request:
+             patch("app.services.llm.requests.post", side_effect=[self.response("invalid json"), self.response("invalid again"), self.response('{"ok":true}')]) as request:
             self.assertEqual(llm._call([], expect_json=True), '{"ok":true}')
-            self.assertEqual(request.call_count, 2)
+            self.assertEqual(request.call_count, 3)
+            self.assertEqual(request.call_args.kwargs["json"]["model"], "backup")
 
     def test_errors_never_echo_upstream_credentials(self):
         with patch("app.services.llm.provider_config", return_value={**self.CONFIG, "sub2api_fallback_api_key": ""}), \
