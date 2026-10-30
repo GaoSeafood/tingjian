@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft, AudioLines, Check, ChevronRight, Clock3, Copy, Download, ExternalLink, Film, Video, Crown,
-  History, Link2, LoaderCircle, LockKeyhole, LogOut, PencilLine,
-  Play, RotateCcw, Search, Sparkles, Trash2, Upload, UserRound, Volume2, WandSparkles, X,
+  History, LoaderCircle, LockKeyhole, LogOut, PencilLine,
+  RotateCcw, Search, Sparkles, Trash2, Upload, UserRound, WandSparkles, X,
   SlidersHorizontal, Save, Languages, ChevronDown, KeyRound, Layers3, Sun, Moon, Monitor,
-  LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards,
+  LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards, Menu, Mic, CircleHelp,
 } from 'lucide-react'
 import { api } from './api'
 import WorkspaceHistory from './WorkspaceHistory'
+import WorkspaceHome from './WorkspaceHome'
+import TranscriptDocument from './TranscriptDocument'
+import AudioPlayer from './AudioPlayer'
+import { BrandLogo, HelpDialog, ToolChoice } from './brand'
 
 const COPY = {
   zh: {
@@ -92,12 +96,12 @@ function useTaskDisplayProgress(task) {
   return taskDisplayProgress(task, now)
 }
 
-function Logo() {
-  return <div className="logo"><span className="wave"><i/><i/><i/><i/><i/></span><strong>听见</strong></div>
-}
+function Logo() { return <BrandLogo /> }
 
-function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageChange, onLogout, panelMode }) {
+function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageChange, onLogout }) {
   const [accountOpen, setAccountOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [languageOpen, setLanguageOpen] = useState(false)
   const [themeOpen, setThemeOpen] = useState(false)
   const [billing, setBilling] = useState(null)
@@ -110,7 +114,7 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
       if (!languageRef.current?.contains(event.target)) setLanguageOpen(false)
       if (!themeRef.current?.contains(event.target)) setThemeOpen(false)
     }
-    const escape = event => { if (event.key === 'Escape') { setAccountOpen(false); setLanguageOpen(false); setThemeOpen(false) } }
+    const escape = event => { if (event.key === 'Escape') { setAccountOpen(false); setLanguageOpen(false); setThemeOpen(false); setNavOpen(false) } }
     document.addEventListener('pointerdown', dismiss)
     document.addEventListener('keydown', escape)
     return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape) }
@@ -118,20 +122,25 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
   useEffect(() => {
     if (accountOpen) api.billing().then(setBilling).catch(() => setBilling(null))
   }, [accountOpen])
-  const openPage = nextPage => { setPage(nextPage); setAccountOpen(false) }
+  const openPage = nextPage => { if (setPage(nextPage) !== false) { setAccountOpen(false); setNavOpen(false) } }
   const quotaTotal = billing?.plan?.monthly_minutes
   const quotaUnlimited = billing?.unlimited || quotaTotal < 0
   const quotaRemaining = billing?.remaining_minutes
   const quotaProgress = quotaUnlimited || !quotaTotal ? 0 : Math.min(100, Math.max(0, billing.used_minutes / quotaTotal * 100))
-  return <header className={`header ${page === 'admin' ? 'admin-header' : ''}`}>
-    <Logo />
-    <nav>
-      <button className={page === 'home' || page === 'detail' ? 'active' : ''} onClick={() => setPage('home')}>{tr(lang, 'workspace')}</button>
-      <button className={page === 'history' ? 'active' : ''} onClick={() => setPage('history')}>{tr(lang, 'history')}</button>
-      <button className={page === 'membership' ? 'active' : ''} onClick={() => setPage('membership')}>{tr(lang, 'membership')}</button>
-      {user?.role === 'admin' && <button className={page === 'admin' ? 'active' : ''} onClick={() => setPage('admin')}>{lang === 'en' ? 'Admin' : '管理后台'}</button>}
-    </nav>
-    <div className="account">
+  const navigate = next => { if (setPage(next) !== false) setNavOpen(false) }
+  return <>
+    <button type="button" className="mobile-menu-toggle" aria-label={lang === 'en' ? 'Open navigation' : '打开导航'} aria-expanded={navOpen} aria-controls="workspace-navigation" onClick={() => setNavOpen(true)}><Menu size={22}/></button>
+    {navOpen && <button type="button" className="sidebar-scrim" aria-label="关闭导航" onClick={() => setNavOpen(false)}/>}
+    <header className={`header miji-sidebar ${navOpen ? 'is-open' : ''}`} id="workspace-navigation">
+      <div className="sidebar-brand"><button type="button" className="brand-home" onClick={() => navigate('home')} aria-label="米叽工作台"><Logo /></button><button type="button" className="mobile-menu-close" aria-label="关闭导航" onClick={() => setNavOpen(false)}><X size={20}/></button></div>
+      <nav aria-label={lang === 'en' ? 'Main navigation' : '主导航'}>
+        <button aria-current={page === 'home' ? 'page' : undefined} className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}><Mic size={23} strokeWidth={1.6}/><span>{lang === 'en' ? 'Transcription' : '听写工作台'}</span></button>
+        <button aria-current={page === 'download' ? 'page' : undefined} className={page === 'download' ? 'active' : ''} onClick={() => navigate('download')}><Download size={23} strokeWidth={1.6}/><span>{lang === 'en' ? 'Video downloads' : '视频下载'}</span></button>
+        <button aria-current={page === 'history' ? 'page' : undefined} className={page === 'history' || page === 'detail' ? 'active' : ''} onClick={() => navigate('history')}><History size={23} strokeWidth={1.6}/><span>{tr(lang, 'history')}</span></button>
+      </nav>
+      <div className="sidebar-bottom">
+        <button type="button" className="sidebar-help" onClick={() => setHelpOpen(true)}><CircleHelp size={21}/><span>{lang === 'en' ? 'Help & support' : '帮助与反馈'}</span></button>
+        <div className="account">
       <div className="theme-menu" ref={themeRef}>
         <button className="theme-trigger" aria-label={tr(lang, 'appearance')} title={tr(lang, 'appearance')} aria-expanded={themeOpen} onClick={() => { setThemeOpen(value => !value); setLanguageOpen(false); setAccountOpen(false) }}>
           {theme === 'dark' ? <Moon size={18}/> : theme === 'light' ? <Sun size={18}/> : <Monitor size={18}/>}
@@ -166,7 +175,10 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
         </section>}
       </div>
     </div>
-  </header>
+      </div>
+    </header>
+    <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} lang={lang}/>
+  </>
 }
 
 function Login({ onLogin, lang, onLanguageChange }) {
@@ -254,123 +266,7 @@ function TaskTable({ tasks, onOpen, onDelete, full = false, lang = 'zh' }) {
   </section>
 }
 
-function Home({ tasks, refresh, onOpen, lang }) {
-  const [file, setFile] = useState(null)
-  const [input, setInput] = useState('')
-  const [mode, setMode] = useState('transcribe')
-  const [batchMode, setBatchMode] = useState(false)
-  const [extractionMode, setExtractionMode] = useState('prefer_subtitles')
-  const [drag, setDrag] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const inputRef = useRef(null)
-  const submit = async (nextFile = file, nextInput = input) => {
-    setBusy(true); setError('')
-    try {
-      if (mode === 'transcribe' && batchMode && !nextFile) {
-        const urls = nextInput.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
-        const result = await api.batch(urls, extractionMode)
-        await refresh(); onOpen(result.tasks[0].id)
-      } else {
-        const task = mode === 'download' ? await api.download(nextInput) : nextFile ? await api.upload(nextFile) : await api.url(nextInput, extractionMode)
-        await refresh(); onOpen(task.id)
-      }
-    } catch (err) { setError(err.message) } finally { setBusy(false) }
-  }
-  const choose = (selected) => {
-    if (!selected || busy || mode === 'download') return
-    setFile(selected); setInput(''); setError('')
-  }
-  const clearFile = () => { setFile(null); setError('') }
-  return <main className="home-page">
-    <section className="home-hero">
-      <div className="home-content shell">
-        <div className="home-eyebrow"><span className="home-eyebrow-dot"/>{tr(lang, 'eyebrow')}</div>
-        <section className="hero-copy">
-          <h1>{tr(lang, 'heroOne')}<br/><span>{tr(lang, 'heroTwo')}</span></h1>
-          <p>{tr(lang, 'intro')}</p>
-        </section>
-        <section className="home-input-panel" aria-label="创建视频听写任务">
-          <div className="mode-tabs" role="tablist" aria-label="选择任务类型">
-            <button type="button" role="tab" aria-selected={mode === 'transcribe'} className={mode === 'transcribe' ? 'selected' : ''} onClick={() => { setMode('transcribe'); setError('') }}><AudioLines size={18}/>{tr(lang, 'transcribe')}</button>
-            <button type="button" role="tab" aria-selected={mode === 'download'} className={mode === 'download' ? 'selected' : ''} onClick={() => { setMode('download'); setFile(null); setBatchMode(false); setError('') }}><Download size={18}/>{tr(lang, 'downloadVideo')}</button>
-            {mode === 'transcribe' && <button type="button" className={`batch-toggle ${batchMode ? 'selected' : ''}`} onClick={() => { setBatchMode(value => !value); setFile(null); setError('') }}>{batchMode ? '单条听写' : '批量听写'}</button>}
-          </div>
-          <div className={`unified-input ${drag ? 'drag' : ''} ${file ? 'has-file' : ''}`}
-            onDragOver={e => { if (mode === 'transcribe') { e.preventDefault(); setDrag(true) } }} onDragLeave={() => setDrag(false)}
-            onDrop={e => { e.preventDefault(); setDrag(false); if (mode === 'transcribe') choose(e.dataTransfer.files[0]); else setError('下载模式请粘贴视频链接或分享文案。') }}>
-            <Link2 size={22} className="unified-input-icon" />
-            {batchMode && mode === 'transcribe' ? <textarea value={input} onChange={e => { setInput(e.target.value); setFile(null) }} placeholder="每行粘贴一个视频链接，最多 20 条" aria-label="批量视频链接" rows={3}/> : <input value={file ? file.name : input} readOnly={!!file} onChange={e => { setInput(e.target.value); setFile(null) }} onKeyDown={event => {
-              // Let the IME finish composing Chinese text first; a confirmed Enter
-              // then follows the same path as clicking “开始听写”.
-              if (event.key === 'Enter' && !event.isComposing) {
-                event.preventDefault()
-                if (!busy && (file || input.trim())) submit()
-              }
-            }} placeholder={mode === 'download' ? tr(lang, 'pasteDownload') : tr(lang, 'pasteVideo')} aria-label={lang === 'en' ? 'Video link or sharing text' : '视频链接或分享文案'} />}
-            <input ref={inputRef} type="file" accept="video/*,audio/*" hidden disabled={busy || mode === 'download'} onChange={e => { choose(e.target.files[0]); e.target.value = '' }}/>
-            {mode === 'transcribe' && <button type="button" className="upload-button" disabled={busy} onClick={() => inputRef.current?.click()}><Upload size={18}/>{tr(lang, 'upload')}</button>}
-            <button className="home-submit" disabled={busy || (mode === 'download' ? !input.trim() : !file && !input.trim())} onClick={() => submit()}>
-              {busy ? <LoaderCircle className="spin" size={19}/> : mode === 'download' ? <Download size={18}/> : <Sparkles size={18}/>}<span>{busy ? mode === 'download' ? tr(lang, 'parsing') : tr(lang, 'submitting') : mode === 'download' ? tr(lang, 'startDownload') : tr(lang, 'start')}</span>
-            </button>
-          </div>
-          {file && <span className="file-pill">{file.type.startsWith('audio/') ? <AudioLines size={15}/> : <Video size={15}/>} {file.name} · {fileSize(file.size)}<button type="button" aria-label="移除已选文件" title="移除文件" onClick={clearFile}><X size={15}/></button></span>}
-          <div className="home-form-foot">
-            {mode === 'transcribe' && !file && <label className="extraction-mode">{lang === 'en' ? 'Extraction mode' : '提取方式'}<select aria-label="文案提取方式" value={extractionMode} onChange={e => setExtractionMode(e.target.value)} disabled={busy}>
-              <option value="prefer_subtitles">{lang === 'en' ? 'Subtitles first, audio as fallback' : '字幕优先：无字幕时自动听写'}</option>
-              <option value="asr">{lang === 'en' ? 'Transcribe audio' : '重新听写：始终根据音频识别'}</option>
-            </select><small>{lang === 'en' ? 'Subtitle lookup is available for Bilibili and YouTube.' : 'B站、YouTube 可尝试提取现成字幕，结果会标明来源。'}</small></label>}
-            <p className="unified-hint">{mode === 'download' ? tr(lang, 'hintDownload') : file ? tr(lang, 'hintFile') : tr(lang, 'hintTranscribe')}</p>
-            {error && <div className="error-line spacious">{error}</div>}
-          </div>
-        </section>
-        <div className="home-platforms"><span>{tr(lang, 'platforms')}</span><i/>抖音<i/>快手<i/>小红书<i/>B 站<i/>YouTube<i/>{tr(lang, 'localMedia')}</div>
-        <div className="home-benefits"><span><Check size={16}/>{tr(lang, 'benefit1')}</span><span><LockKeyhole size={15}/>{tr(lang, 'benefit2')}</span><span><Clock3 size={15}/>{tr(lang, 'benefit3')}</span></div>
-      </div>
-    </section>
-    <section className="home-followup">
-      <section className="home-recent shell"><TaskTable tasks={tasks.slice(0, 5)} onOpen={onOpen} lang={lang}/></section>
-      <section className="home-learn shell">
-        <div className="learn-heading"><span>{tr(lang, 'learnEyebrow')}</span><h2>{tr(lang, 'learnTitle')}</h2><p>{tr(lang, 'learnIntro')}</p></div>
-        <div className="learn-grid">
-          <article className="learn-card"><span className="learn-icon"><AudioLines size={21}/></span><h3>{tr(lang, 'feature1Title')}</h3><p>{tr(lang, 'feature1')}</p><small>01</small></article>
-          <article className="learn-card"><span className="learn-icon"><Download size={21}/></span><h3>{tr(lang, 'feature2Title')}</h3><p>{tr(lang, 'feature2')}</p><small>02</small></article>
-          <article className="learn-card"><span className="learn-icon"><WandSparkles size={21}/></span><h3>{tr(lang, 'feature3Title')}</h3><p>{tr(lang, 'feature3')}</p><small>03</small></article>
-        </div>
-        <div className="learn-flow"><span><i>1</i>{tr(lang, 'step1')}</span><b/><span><i>2</i>{tr(lang, 'step2')}</span><b/><span><i>3</i>{tr(lang, 'step3')}</span></div>
-        <p className="learn-footer">{tr(lang, 'pageEnd')}</p>
-      </section>
-    </section>
-  </main>
-}
 
-function TranscriptEditor({ segments, showTimes, showSpeakers, onChange, disabled = false }) {
-  const areaRef = useRef(null)
-  const value = segments.map(segment => {
-    const speaker = showSpeakers && segment.speaker ? `[${segment.speaker}] ` : ''
-    return `${showTimes ? `[${segment.start}] ` : ''}${speaker}${segment.text}`
-  }).join('\n')
-  useEffect(() => {
-    const area = areaRef.current
-    if (!area) return
-    area.style.height = 'auto'
-    area.style.height = `${Math.min(560, Math.max(260, area.scrollHeight))}px`
-    area.style.overflowY = area.scrollHeight > 560 ? 'auto' : 'hidden'
-  }, [value])
-  const edit = event => {
-    const lines = event.target.value.split(/\r?\n/)
-    onChange(lines.map((line, index) => {
-      const base = segments[index] || { start: '', end: '', start_seconds: 0, end_seconds: 0 }
-      let text = showTimes ? line.replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, '') : line
-      if (base.speaker) {
-        const escapedSpeaker = base.speaker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        text = text.replace(new RegExp(`^\\s*\\[${escapedSpeaker}\\]\\s*`), '')
-      }
-      return {...base, text}
-    }))
-  }
-  return <div className="transcript-editor"><textarea ref={areaRef} aria-label="编辑听写稿" disabled={disabled} value={value} onChange={edit} spellCheck="false" wrap="soft" placeholder="听写内容会显示在这里…" /></div>
-}
 
 function clockSeconds(value) {
   const parts = String(value || '').trim().split(':').map(Number)
@@ -442,7 +338,7 @@ function MarkdownPreview({ value }) {
   return <div className="markdown-preview">{blocks.length ? blocks : <p className="empty-markdown">暂无改编内容</p>}</div>
 }
 
-function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, mediaRetryCount, onMediaError, onRetryMedia, onCopyLink, onDownloadVideo, downloadBusy }) {
+function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, mediaRetryCount, onMediaError, onRetryMedia, onCopyLink, onDownloadVideo, downloadBusy, segments = [], onSeek }) {
   const [videoRatio, setVideoRatio] = useState(16 / 9)
   const playbackAudioRef = useRef(null)
   const remoteVideo = mediaMode === 'remote' && Boolean(task.playback_url) && task.playback_kind === 'video'
@@ -466,7 +362,7 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
   }
   const stopPlaybackAudio = () => playbackAudioRef.current?.pause()
   return <section className="media-column-card">
-      <div className="media-section-heading"><h2>{isVideo ? '视频' : '音频'}</h2>{isVideo && <span>{clock(task.duration)}</span>}</div>
+      <div className="media-section-heading"><h2>{isVideo ? '原始视频' : '原始音频'}</h2>{isVideo && <span>{clock(task.duration)}</span>}</div>
       {isVideo && <div className={`source-preview ${videoRatio < 1 ? 'portrait' : ''}`}>
         {task.source_available && mediaMode !== 'failed'
           ? mediaMode === 'preparing'
@@ -477,6 +373,7 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
           }} onError={onMediaError}/>{remoteVideo && task.playback_audio_available && <audio key={playbackAudioSrc} ref={playbackAudioRef} src={playbackAudioSrc} onLoadedMetadata={syncPlaybackAudio} onError={() => { if (mediaRef.current) mediaRef.current.muted = false }} style={{display: 'none'}}/>}</>
           : <div className="source-pending">{['completed','failed'].includes(task.status) || mediaMode === 'failed' ? null : <LoaderCircle className="spin" size={25}/>}<b>{mediaMode === 'failed' || task.status === 'failed' ? '原视频暂不可用' : task.status === 'completed' ? '原视频已清理' : '正在解析视频素材'}</b><span>{mediaMode === 'failed' && task.source_available ? '视频暂时无法播放。' : task.status === 'completed' && !task.source_available ? '听写稿仍然保留。' : task.message}{!['completed','failed'].includes(task.status) ? ` · ${displayProgress}%` : ''}</span>{mediaMode === 'failed' && task.source_available && <button type="button" className="outline compact" onClick={onRetryMedia}>重试播放</button>}</div>}
       </div>}
+      {!isVideo && <img className="audio-cover-art" src="/brand/miji-audio.png" alt="戴着耳机倾听的米叽小猴子" width="1254" height="1254"/>}
       <div className="source-actions">
         {isVideo && task.cover_available && <a className="outline compact" href={coverUrl} download><Download size={16}/>保存封面</a>}
         {task.source_url && <button className="outline compact" onClick={onCopyLink}><Copy size={16}/>复制链接</button>}
@@ -486,7 +383,8 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
       <section className="asset-section">
         <div className="media-section-heading"><h3>音频</h3>{task.audio_available && <a className="audio-download" href={audioUrl} download><Download size={16}/>下载音频</a>}</div>
         {task.audio_available
-          ? <audio className="asset-audio-player" controls preload="metadata" src={audioUrl}/>
+          ? isVideo ? <audio className="asset-audio-player" controls preload="metadata" src={audioUrl}/> : <AudioPlayer key={audioUrl} src={audioUrl} mediaRef={mediaRef}/>
+
           : <div className="audio-pending">{['completed','failed'].includes(task.status) ? null : <LoaderCircle className="spin" size={16}/>} {task.status === 'failed' || task.status === 'completed' ? '音频暂不可用' : '正在准备音频…'}</div>}
       </section>
       {isVideo && <section className="asset-section image-list-section">
@@ -495,6 +393,7 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
           ? <a className="cover-tile" href={coverUrl} download aria-label="下载视频封面"><img src={coverUrl} alt="视频封面"/><span><Download size={20}/>下载封面</span></a>
           : <div className="cover-pending">{task.status === 'failed' || task.status === 'completed' ? '封面暂不可用' : '正在生成封面…'}</div>}
       </section>}
+      {segments.length > 0 && <section className="media-timestamps"><h3>时间点</h3>{segments.filter((segment, index) => index === 0 || index % Math.max(1, Math.ceil(segments.length / 6)) === 0).slice(0, 6).map((segment, index) => <button type="button" key={index} onClick={() => onSeek?.(segment.start_seconds ?? segment.start)}><span className="timestamp-dot"/><time>{segment.start || '00:00'}</time><span>{segment.text}</span></button>)}</section>}
       <small className="media-retention-note">视频和音频会在 24 小时后自动清理，听写稿会保留。</small>
     </section>
 }
@@ -504,8 +403,6 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
   const displayProgress = Math.round(useTaskDisplayProgress(task))
   const [segments, setSegments] = useState([])
   const [search, setSearch] = useState('')
-  const showTimes = false
-  const showSpeakers = false
   const [dirty, setDirty] = useState(false)
   const [direction, setDirection] = useState('')
   const [action, setAction] = useState(null)
@@ -592,30 +489,31 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
     if (dirtyRef.current) await save()
     if (rewriteDirtyRef.current) await saveRewrite()
   }
-  const showHighlights = () => { setActiveTool('highlights'); setAction(null); setNotice('') }
+  const revealResults = () => requestAnimationFrame(() => document.getElementById('workspace-results')?.scrollIntoView({behavior: 'smooth', block: 'start'}))
+  const showHighlights = () => { revealResults(); setActiveTool('highlights'); setAction(null); setNotice('') }
   const startHighlights = async () => {
     showHighlights(); setAction('highlights')
     try { await ensureSaved(); await api.highlights(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startSummary = async () => {
-    setActiveTool('summary'); setAction('summary'); setNotice('')
+    revealResults(); setActiveTool('summary'); setAction('summary'); setNotice('')
     try { await ensureSaved(); await api.summarize(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startTranslation = async () => {
-    setActiveTool('translate'); setAction('translate'); setNotice('')
+    revealResults(); setActiveTool('translate'); setAction('translate'); setNotice('')
     try { await ensureSaved(); await api.translate(taskId, translateLanguage); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
-  const showVisualAnalysis = () => { setActiveTool('visual'); setAction(null); setNotice('') }
+  const showVisualAnalysis = () => { revealResults(); setActiveTool('visual'); setAction(null); setNotice('') }
   const startVisualAnalysis = async () => {
     showVisualAnalysis(); setAction('visual')
     try { await ensureSaved(); await api.visualAnalysis(taskId); await load() }
     catch (err) { setAction(null); setNotice(err.message) }
   }
   const startRewrite = async () => {
-    setActiveTool('rewrite'); setAction('rewrite'); setNotice('')
+    revealResults(); setActiveTool('rewrite'); setAction('rewrite'); setNotice('')
     try { await ensureSaved(); await api.rewrite(taskId, direction); await load() }
     catch (err) { setAction('rewrite'); setNotice(err.message) }
   }
@@ -729,44 +627,44 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
   const retainedSubtitleVideo = ['author_subtitles', 'automatic_subtitles'].includes(task.transcript_source) && task.source_delete_at && new Date(task.source_delete_at) > new Date()
   const transcriptionComplete = task.status === 'completed' && displayProgress >= 100
   const transcriptionFailed = task.status === 'failed'
-  const transcriptPreview = segments.slice(0, 2).map(segment => segment.text).join(' ')
-  return <main className="detail shell">
-    <div className="detail-head"><button type="button" className="detail-back-button" onClick={onBack} aria-label="返回工作台" title="返回工作台"><ArrowLeft size={21}/></button><h1>文案提取结果</h1></div>
-    <section className="result-overview">
-      <div className="result-meta"><span className="result-chip platform-chip">{task.source_platform || '本地文件'}</span><span className={`result-chip ${transcriptionComplete ? 'complete-chip' : transcriptionFailed ? 'failed-chip' : 'working-chip'}`}>{transcriptionComplete ? '提取结果：原文' : transcriptionFailed ? '提取失败' : '正在提取文案'}</span><span className="result-duration">时长：{clock(task.duration)}</span>{task.source_url && <a className="original-link" href={task.source_url} target="_blank" rel="noreferrer"><ExternalLink size={16}/>访问原文</a>}</div>
-      <div className="result-title-row"><h2>{task.title || '暂无标题'}</h2><button type="button" className="icon-button" aria-label="复制视频标题" title="复制视频标题" onClick={() => copyResultText(task.title || '', '视频标题')}><Copy size={17}/></button></div>
-      <div className="result-excerpt-row"><p>{transcriptPreview || (transcriptionFailed ? task.error : transcriptionComplete ? '暂无听写内容' : `${task.message} ${displayProgress}%`)}</p>{transcriptPreview && <button type="button" className="icon-button" aria-label="复制文案摘要" title="复制文案摘要" onClick={() => copyResultText(transcriptPreview, '文案摘要')}><Copy size={17}/></button>}</div>
-    </section>
+  const exportTranscript = async format => {
+    try { await ensureSaved(); window.location.assign(`/api/tasks/${task.id}/export/${format}`) }
+    catch (err) { setNotice(err.message) }
+  }
+  return <main className="detail miji-detail">
+    <div className="detail-head"><button type="button" className="detail-back-button" onClick={onBack}><ArrowLeft size={21}/><span>返回</span></button><h1>{task.title || '听写文稿'}</h1><span className={`editor-task-status ${transcriptionComplete ? 'is-complete' : ''}`}><i/>{transcriptionComplete ? '听写完成' : transcriptionFailed ? '听写失败' : '正在听写'}</span>
+      <div className="editor-head-actions"><button type="button" className="outline compact" disabled={!transcriptionComplete} onClick={() => copyResultText(segments.map(segment => segment.text).join('\n'), '完整文案')}><Copy size={17}/><span>复制全文</span></button><details className="export-menu"><summary className="primary compact"><Upload size={17}/><span>导出文稿</span><ChevronDown size={14}/></summary><div><button type="button" disabled={running || !transcriptionComplete} onClick={() => exportTranscript('txt')}>TXT · 纯文本</button><button type="button" disabled={running || !transcriptionComplete} onClick={() => exportTranscript('srt')}>SRT · 字幕文件</button></div></details></div>
+    </div>
     {notice && <div className="notice inline-notice">{notice}</div>}
     {transcriptionComplete && <div className="transcript-provenance"><span>文案来源：{{author_subtitles: '作者字幕', automatic_subtitles: '平台自动字幕', asr: '语音转写'}[task.transcript_source] || '语音转写'}{task.transcript_language && task.transcript_language !== 'auto' ? ` · ${task.transcript_language}` : ''} · 原稿 v{task.transcript_revision || 1}</span>
       {task.source_url && task.transcript_source !== 'asr' && <button type="button" className="outline compact" disabled={running || retryBusy} onClick={retranscribe}>根据音频重新听写</button>}
     </div>}
     <div className={`detail-result-grid ${transcriptionComplete ? '' : 'pending-grid'}`}>
-      <SourceMedia task={task} displayProgress={displayProgress} mediaRef={mediaRef} mediaSrc={mediaSrc} mediaMode={playbackMode} mediaRetryCount={mediaRetryCount} onMediaError={handleMediaError} onRetryMedia={retryMedia} onCopyLink={copySourceLink} onDownloadVideo={downloadOriginalVideo} downloadBusy={downloadBusy}/>
+      <SourceMedia task={task} displayProgress={displayProgress} mediaRef={mediaRef} mediaSrc={mediaSrc} mediaMode={playbackMode} mediaRetryCount={mediaRetryCount} onMediaError={handleMediaError} onRetryMedia={retryMedia} onCopyLink={copySourceLink} onDownloadVideo={downloadOriginalVideo} downloadBusy={downloadBusy} segments={segments} onSeek={seekTo}/>
       <section className="transcript-column-card">
         {transcriptionComplete ? <>
-          <div className="ai-panel">
-            <span className="ai-panel-label"><Sparkles size={16}/>用 AI 做更多</span>
-            <p>将视频文案作为输入，选择一个工具继续处理。</p>
-            <div className="ai-tool-buttons">
-              <button className={`ai-tool-button summary-tool ${activeTool === 'summary' ? 'active' : ''}`} disabled={running} onClick={task.summary_text ? () => { setActiveTool('summary'); setAction(null) } : startSummary}><Sparkles size={17}/>{task.ai_status === 'summarizing' ? '总结中…' : task.summary_text ? '查看摘要' : 'AI 总结'}</button>
-              <button className={`ai-tool-button highlights-tool ${activeTool === 'highlights' ? 'active' : ''}`} disabled={running} onClick={task.highlights?.length ? showHighlights : startHighlights}><WandSparkles size={17}/>{task.ai_status === 'highlighting' ? '提取中…' : task.highlights?.length ? '精彩片段' : '提取精彩片段'}</button>
-              <button className={`ai-tool-button visual-tool ${activeTool === 'visual' ? 'active' : ''}`} disabled={running || !canAnalyzeVisuals || (!task.source_available && !retainedSubtitleVideo) || ['queued','analyzing'].includes(task.visual_status)} onClick={task.visual_analysis?.length && hasVisualStyle ? showVisualAnalysis : startVisualAnalysis}><Film size={17}/>{['queued','analyzing'].includes(task.visual_status) ? '分析中…' : task.visual_analysis?.length ? '查看画面分析' : '分析画面'}</button>
-              <button className={`ai-tool-button rewrite-tool ${activeTool === 'rewrite' ? 'active' : ''}`} disabled={running} onClick={() => { setActiveTool('rewrite'); setAction(task.rewrite_text ? null : 'rewrite'); setNotice('') }}><PencilLine size={17}/>{task.rewrite_text ? '查看改写稿' : '改写文案'}</button>
-              <button className={`ai-tool-button translate-tool ${activeTool === 'translate' ? 'active' : ''}`} disabled={running} onClick={() => { setActiveTool('translate'); setAction(task.translated_text ? null : 'translate'); setNotice('') }}><Languages size={17}/>{task.translated_text ? '查看译文' : '翻译文案'}</button>
-            </div>
-          </div>
+          <div className="transcript-section-heading"><h2>听写文稿</h2><span><PencilLine size={14}/>点击文字即可编辑</span></div>
+          <div className="transcript-tools"><label><Search size={16}/><input aria-label="搜索文案" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索文案"/>{search && <button aria-label="清空搜索" onClick={() => setSearch('')}><X size={15}/></button>}</label>{search && <button className="outline compact" onClick={() => copyResultText(visible.map(item => item.text).join('\n'), '搜索结果')}>复制结果 ({visible.length})</button>}</div>
+          <TranscriptDocument segments={visible} onChange={updateVisible} onSeek={seekTo} disabled={running}/>
+          <div className="document-footer"><span>{dirty ? <PencilLine size={17}/> : <Check size={17}/>} {dirty ? '有未保存的修改' : '已保存'}</span>{dirty ? <button className="primary compact" disabled={running} onClick={() => save().catch(err => setNotice(err.message))}>{transcriptSaving ? '保存中…' : '保存修改'}</button> : <span>{segments.length} 段听写 · TXT / SRT</span>}</div>
+        </> : <div className={`transcript-pending ${transcriptionFailed ? 'failed' : ''}`}>
+          {transcriptionFailed ? <RotateCcw size={25}/> : <span className="pending-wave"><i/><i/><i/><i/><i/></span>}
+          <div><h2>{transcriptionFailed ? '文案提取失败' : task.status === 'completed' ? '正在整理听写结果' : 'AI 正在提取视频文案'}</h2><p>{transcriptionFailed ? task.error : task.status === 'completed' ? '听写已完成，正在整理结果…' : `${task.message}，完成后会显示在这里。`}</p></div>
+          {!transcriptionFailed && <div className="big-progress"><i style={{width: `${displayProgress}%`}}/></div>}
+          {!transcriptionFailed && <b>{displayProgress}%</b>}
+          {transcriptionFailed && <div className="retry-task-actions"><button className="primary compact" disabled={retryBusy} onClick={retryFailedTask}>{retryBusy ? <LoaderCircle className="spin" size={17}/> : <RotateCcw size={17}/>}重新提交听写</button></div>}
+        </div>}
+      </section>
+      {transcriptionComplete && <aside className="miji-tools-rail"><h2>下一步</h2><p>按需要，继续处理这份文稿。</p>
+        <ToolChoice icon={Sparkles} title="找亮点" description="从原话里发现值得留下的片段。" label={task.ai_status === 'highlighting' ? '正在查找…' : task.highlights?.length ? '查看亮点' : '开始查找'} disabled={running} active={activeTool === 'highlights' && (action || task.highlights?.length > 0)} onClick={task.highlights?.length ? showHighlights : startHighlights}/>
+        <ToolChoice icon={Film} title="画面分析" description="为视频补充画面信息。" note={!canAnalyzeVisuals ? '当前为音频文件' : !task.source_available && !retainedSubtitleVideo ? '原始媒体已清理' : ''} label={['queued','analyzing'].includes(task.visual_status) ? '正在分析…' : task.visual_analysis?.length ? '查看分析' : '开始分析'} disabled={running || !canAnalyzeVisuals || (!task.source_available && !retainedSubtitleVideo)} active={activeTool === 'visual' && task.visual_analysis?.length > 0} onClick={task.visual_analysis?.length && hasVisualStyle ? showVisualAnalysis : startVisualAnalysis}/>
+        <ToolChoice icon={PencilLine} title="复刻改编" description="换个主题，写出新的表达。" label={task.rewrite_text ? '查看改写稿' : '开始改编'} disabled={running} active={activeTool === 'rewrite'} onClick={() => { setActiveTool('rewrite'); setAction(task.rewrite_text ? null : 'rewrite'); setNotice('') }}/>
+        <details className="more-editor-tools"><summary>更多工具<ChevronDown size={15}/></summary><div className="ai-tool-buttons"><button className="outline compact" disabled={running} onClick={task.summary_text ? () => { setActiveTool('summary'); setAction(null) } : startSummary}><Sparkles size={16}/>AI 总结</button><button className="outline compact" disabled={running} onClick={() => { setActiveTool('translate'); setAction(task.translated_text ? null : 'translate'); setNotice('') }}><Languages size={16}/>翻译文案</button></div></details>
           {action === 'rewrite' && <div className="rewrite-form"><label><span>新稿方向</span><small>可以调整方向后再次生成</small><textarea value={direction} onChange={e => setDirection(e.target.value)} placeholder="例如：改成面向新手的 60 秒口播，语气自然、有反差感"/></label><button className="primary compact" disabled={running} onClick={startRewrite}>生成新文案</button></div>}
           {action === 'translate' && <div className="rewrite-form translation-form"><label><span>翻译目标语言</span><select value={translateLanguage} onChange={event => setTranslateLanguage(event.target.value)}><option>英语</option><option>简体中文</option><option>繁體中文</option><option>日语</option><option>韩语</option><option>西班牙语</option><option>法语</option></select></label><button className="primary compact" disabled={running} onClick={startTranslation}>开始翻译</button></div>}
-          <div className="transcript-section-heading"><div><h2>视频文案</h2><span>{segments.length} 段听写</span></div></div>
-          <div className="transcript-tools"><label><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文案" /></label>
-            <button className="outline compact" onClick={() => copyResultText((search ? visible : segments).map(x => x.text).join('\n'), search ? '搜索结果' : '完整文案')}><Copy size={17}/>{search ? `复制搜索结果 (${visible.length})` : '复制文案'}</button>
-            <a className="outline compact" href={`/api/tasks/${task.id}/export/txt`}><Download size={17}/>TXT</a>
-            <a className="outline compact" href={`/api/tasks/${task.id}/export/srt`}><Download size={17}/>SRT</a>
-            {dirty && <button className="primary compact" disabled={running} onClick={() => save().catch(err => setNotice(err.message))}>保存修改</button>}
-          </div>
-          <TranscriptEditor segments={visible} showTimes={showTimes} showSpeakers={showSpeakers} onChange={updateVisible} disabled={running}/>
-          <div className="next-results">
+      </aside>}
+    </div>
+    {transcriptionComplete && <section className="workspace-results" id="workspace-results"><div className="next-results">
             {task.stale_results?.includes(activeTool) && <div className="notice">听写稿已更新，下面的结果来自较早版本。可以重新生成。</div>}
             {!running && <div className="result-actions">
               {activeTool === 'summary' && task.summary_text && <button className="outline compact" onClick={startSummary}>重新生成摘要</button>}
@@ -793,16 +691,7 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
             </section>
             <WorkspaceHistory taskId={taskId} disabled={running || dirty || rewriteDirty} onRestore={async kind => { await load(); setActiveTool(kind); setNotice('已恢复为新版本') }}/>
             <div className="retention"><span>视频和音频会在 24 小时后自动清理，听写稿会保留。</span>{task.source_available && <button onClick={async () => { if(confirm('立即删除原视频？听写稿会保留。')) { await api.deleteSource(task.id); load() } }}><Trash2 size={16}/>立即删除素材</button>}</div>
-                              </div>
-        </> : <div className={`transcript-pending ${transcriptionFailed ? 'failed' : ''}`}>
-          {transcriptionFailed ? <RotateCcw size={25}/> : <span className="pending-wave"><i/><i/><i/><i/><i/></span>}
-          <div><h2>{transcriptionFailed ? '文案提取失败' : task.status === 'completed' ? '正在整理听写结果' : 'AI 正在提取视频文案'}</h2><p>{transcriptionFailed ? task.error : task.status === 'completed' ? '听写已完成，正在整理结果…' : `${task.message}，完成后会显示在这里。`}</p></div>
-          {!transcriptionFailed && <div className="big-progress"><i style={{width: `${displayProgress}%`}}/></div>}
-          {!transcriptionFailed && <b>{displayProgress}%</b>}
-          {transcriptionFailed && <div className="retry-task-actions"><button className="primary compact" disabled={retryBusy} onClick={retryFailedTask}>{retryBusy ? <LoaderCircle className="spin" size={17}/> : <RotateCcw size={17}/>}重新提交听写</button></div>}
-        </div>}
-      </section>
-    </div>
+          </div></section>}
   </main>
 }
 
@@ -857,7 +746,7 @@ function MembershipPage({ lang, onBack }) {
   return <main className="membership-page shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>{en ? 'Back to workspace' : '返回工作台'}</button>
     <section className="membership-hero">
-      <span className="membership-eyebrow"><Crown size={15}/>{en ? 'MEMBERSHIP' : '听见会员'}</span>
+      <span className="membership-eyebrow"><Crown size={15}/>{en ? 'MEMBERSHIP' : '米叽会员'}</span>
       <h1>{en ? 'A clearer workflow for every video.' : '让视频文案整理，更顺手一点'}</h1>
       <p>{en ? 'Transcribe, review, and turn video into reusable content in one private workspace.' : '从视频听写到后续创作，在一个私密工作台里完成。根据你的使用量选择合适的会员方案。'}</p>
     </section>
@@ -964,7 +853,7 @@ function APIKeysPage({ lang, onBack }) {
   const copy = async () => { try { await navigator.clipboard.writeText(createdKey); setMessage(en ? 'Copied to clipboard.' : '已复制到剪贴板。') } catch { setMessage(en ? 'Select and copy the key manually.' : '请手动选中并复制密钥。') } }
   return <main className="api-keys-page shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>{en ? 'Back to workspace' : '返回工作台'}</button>
-    <header className="api-keys-heading"><span><KeyRound size={20}/></span><div><h1>API Key</h1><p>{en ? 'Create and revoke keys for the Tingjian transcription API.' : '创建和撤销用于听见听写 API 的访问密钥。'}</p></div></header>
+    <header className="api-keys-heading"><span><KeyRound size={20}/></span><div><h1>API Key</h1><p>{en ? 'Create and revoke keys for the MIJI transcription API.' : '创建和撤销用于米叽听写 API 的访问密钥。'}</p></div></header>
     <section className="api-key-note"><b>{en ? 'Ultra membership feature' : 'Ultra 专业版权益'}</b><p>{en ? 'Keys are shown only once. Store them securely and send them as a Bearer token. Never put a secret key in browser code.' : '密钥只会在创建时完整显示一次，请妥善保存，并通过 Authorization: Bearer 方式调用。不要把密钥写进网页前端代码。'}</p><code>POST /api/v1/tasks · GET /api/v1/tasks/&#123;task_id&#125;</code></section>
     {createdKey && <section className="api-key-created"><div><b>{en ? 'Copy your new key now' : '请立即复制新密钥'}</b><p>{en ? 'For security, it will not be shown again.' : '出于安全考虑，之后无法再次查看完整密钥。'}</p></div><code>{createdKey}</code><button type="button" className="outline" onClick={copy}><Copy size={16}/>{en ? 'Copy' : '复制'}</button><button type="button" className="icon-button" aria-label={en ? 'Dismiss' : '关闭'} onClick={() => setCreatedKey('')}><X size={17}/></button></section>}
     <form className="api-key-create" onSubmit={create}><label htmlFor="api-key-name">{en ? 'Key name' : '密钥名称'}</label><input id="api-key-name" value={name} maxLength={80} onChange={event => setName(event.target.value)} placeholder={en ? 'e.g. Production integration' : '例如：生产环境集成'}/><button type="submit" className="primary" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17}/> : <KeyRound size={17}/>} {en ? 'Create API Key' : '创建 API Key'}</button></form>
@@ -1081,7 +970,7 @@ function SettingsPage({ onBack, user, adminView = false }) {
   if (!form) return <main className="loading-page"><LoaderCircle className="spin"/>{adminView ? '加载管理后台' : '加载账户设置'}</main>
   return <main className="settings-page shell">
     <button className="back" onClick={onBack}><ArrowLeft size={18}/>{adminView ? '返回工作台' : '返回'}</button>
-    <div className="settings-heading"><SlidersHorizontal/><div><h1>{adminView ? '听见管理中心' : '账户设置'}</h1><p>{adminView ? '管理账号、会员申请与听写服务配置。' : '修改登录密码；接口设置仅管理员可管理。'}</p></div></div>
+    <div className="settings-heading"><SlidersHorizontal/><div><h1>{adminView ? '米叽管理中心' : '账户设置'}</h1><p>{adminView ? '管理账号、会员申请与听写服务配置。' : '修改登录密码；接口设置仅管理员可管理。'}</p></div></div>
     {adminView && <div className="admin-console">
       <aside className="admin-sidebar" aria-label="管理后台导航">
         <span className="admin-sidebar-label">管理中心</span>
@@ -1089,7 +978,7 @@ function SettingsPage({ onBack, user, adminView = false }) {
         <div className="admin-sidebar-foot"><Activity size={15}/><span>管理数据已载入</span></div>
       </aside>
       <div className="admin-content">
-        <div className="admin-page-title"><div><span>听见 · 管理中心</span><h2>{adminNav.find(([id]) => id === adminSection)?.[2]}</h2></div><small>{user?.username} · 管理员</small></div>
+        <div className="admin-page-title"><div><span>米叽 · 管理中心</span><h2>{adminNav.find(([id]) => id === adminSection)?.[2]}</h2></div><small>{user?.username} · 管理员</small></div>
         {adminSection === 'overview' && <section className="admin-overview">
           <div className="admin-stat-grid">
             <article><span><Users size={18}/></span><small>用户账号</small><strong>{users.length}</strong><em>含管理员账号</em></article>
@@ -1144,7 +1033,7 @@ function SettingsPage({ onBack, user, adminView = false }) {
       </section>
       <section id="admin-douyin" hidden={adminSection !== 'system'}><div className="settings-section-title"><h2>抖音下载</h2><p>建议使用小号。可用新版 Chrome 扩展同步 Cookie 与浏览器标识，也可上传 Cookie 文件；不保存账号密码。</p></div>
         <div className="cookie-settings"><div><b>{douyinCookies?.configured ? '已配置抖音 Cookie' : '尚未配置抖音 Cookie'}</b><small>{douyinCookies?.configured ? `更新时间：${new Date(douyinCookies.updated_at).toLocaleString()}${douyinCookies.user_agent_configured ? ' · Chrome 标识已同步' : ' · 请更新扩展同步浏览器标识'}` : '抖音链接可能会提示需要新鲜 Cookie'}</small></div><label className="outline cookie-upload"><Upload size={17}/>选择 Cookie 文件<input type="file" accept=".txt,.cookies,text/plain" onChange={uploadCookies} disabled={cookieBusy}/></label></div>
-        <p className="settings-note">在同一 Chrome 配置中登录抖音和听见管理后台，然后安装新版“听见抖音 Cookie 同步”扩展，从已登录的抖音页面主动同步。也可上传 Netscape 格式 Cookie 文件。</p>
+        <p className="settings-note">在同一 Chrome 配置中登录抖音和米叽管理后台，然后安装新版“听见抖音 Cookie 同步”扩展，从已登录的抖音页面主动同步。也可上传 Netscape 格式 Cookie 文件。</p>
       </section>
       <section id="admin-youtube" hidden={adminSection !== 'system'}><div className="settings-section-title"><h2>YouTube 访问</h2><p>服务器出口触发登录验证时，上传已登录 Chrome 导出的 YouTube cookies.txt。Cookie 仅供管理员自己的任务使用，保存在服务器受限文件中，不会回显。</p></div>
         <div className="cookie-settings"><div><b>{youtubeCookies?.configured ? '已配置 YouTube Cookie' : '尚未配置 YouTube Cookie'}</b><small>{youtubeCookies?.configured ? `更新时间：${new Date(youtubeCookies.updated_at).toLocaleString()}` : '数据中心 IP 可能需要登录态'}</small></div><label className="outline cookie-upload"><Upload size={17}/>选择 YouTube Cookie<input type="file" accept=".txt,.cookies,text/plain" onChange={uploadYoutubeCookies} disabled={cookieBusy}/></label>{youtubeCookies?.configured && <button className="outline" disabled={cookieBusy} onClick={deleteYoutubeCookies}>移除登录态</button>}</div>
@@ -1206,7 +1095,7 @@ function App() {
     return true
   }
   const [lang, setLang] = useState(() => window.localStorage.getItem('tingjian-language') === 'en' ? 'en' : 'zh')
-  const [theme, setTheme] = useState(() => ['light', 'dark'].includes(window.localStorage.getItem('tingjian-theme')) ? window.localStorage.getItem('tingjian-theme') : 'system')
+  const [theme, setTheme] = useState(() => ['light', 'dark', 'system'].includes(window.localStorage.getItem('tingjian-theme')) ? window.localStorage.getItem('tingjian-theme') : 'light')
   const [tasks, setTasks] = useState([])
   const [selected, setSelected] = useState(null)
   const [importing, setImporting] = useState(false)
@@ -1261,8 +1150,8 @@ function App() {
   if (user === undefined) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
   if (!user) return <Login lang={lang} onLanguageChange={changeLanguage} onLogin={async me => { setUser(me); await refresh() }}/>
   const open = id => { if (setPage('detail')) setSelected(id) }
-  return <div className="app"><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { if (unsavedRef.current && !window.confirm('有尚未保存的文案修改，确定退出吗？')) return; unsavedRef.current = false; await api.logout(); setUser(null) }}/>
-    {page === 'home' && <Home tasks={tasks} refresh={refresh} onOpen={open} lang={lang}/>}
+  return <div className={`app miji-app page-${page}`}><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { if (unsavedRef.current && !window.confirm('有尚未保存的文案修改，确定退出吗？')) return; unsavedRef.current = false; await api.logout(); setUser(null) }}/>
+    {(page === 'home' || page === 'download') && <WorkspaceHome key={page} kind={page === 'download' ? 'download' : 'transcribe'} tasks={tasks} refresh={refresh} onOpen={open} onHistory={() => setPage('history')} renderStatus={task => <StatusMark task={task} lang={lang}/>} lang={lang}/>}
     {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>{lang === 'en' ? 'History' : '历史记录'}</h1><p>{lang === 'en' ? 'Your transcripts, AI analysis, and download tasks are saved here.' : '你的听写稿、AI 分析和下载任务都保存在这里。'}</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full lang={lang}/></main>}
     {page === 'membership' && <MembershipPage lang={lang} onBack={() => setPage('home')}/>}
     {page === 'benefits' && <BenefitsPage lang={lang} onBack={() => setPage('home')} onUpgrade={() => setPage('membership')}/>}

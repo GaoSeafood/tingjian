@@ -23,6 +23,7 @@ ALLOWED_HOST_SUFFIXES = (
     "youtu.be", "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn",
     "tiktok.com", "instagram.com", "twitter.com", "x.com",
     "kuaishou.com", "kuaishou.cn", "gifshow.com",
+    "vimeo.com", "dailymotion.com", "dai.ly", "reddit.com", "redd.it", "twitch.tv",
 )
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -102,6 +103,10 @@ def source_platform_label(url: str | None) -> str:
         (("weibo.com", "weibo.cn"), "微博"),
         (("instagram.com",), "Instagram"),
         (("twitter.com", "x.com"), "X / Twitter"),
+        (("vimeo.com",), "Vimeo"),
+        (("dailymotion.com", "dai.ly"), "Dailymotion"),
+        (("reddit.com", "redd.it"), "Reddit"),
+        (("twitch.tv",), "Twitch"),
         (("oceanengine.com",), "抖音"),
         (("qq.com", "qpic.cn", "qlogo.cn", "weixin.qq.com", "wechat.com"), "腾讯/微信"),
     )
