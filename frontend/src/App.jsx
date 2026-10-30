@@ -4,7 +4,7 @@ import {
   History, LoaderCircle, LockKeyhole, LogOut, PencilLine,
   RotateCcw, Search, Sparkles, Trash2, Upload, UserRound, WandSparkles, X,
   SlidersHorizontal, Save, Languages, ChevronDown, KeyRound, Layers3, Sun, Moon, Monitor,
-  LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards, Menu, Mic, CircleHelp,
+  LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards, Menu, Mic, CircleHelp, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { api } from './api'
 import WorkspaceHistory from './WorkspaceHistory'
@@ -98,7 +98,7 @@ function useTaskDisplayProgress(task) {
 
 function Logo() { return <BrandLogo /> }
 
-function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageChange, onLogout }) {
+function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageChange, onLogout, sidebarCollapsed, onSidebarToggle }) {
   const [accountOpen, setAccountOpen] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -131,8 +131,8 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
   return <>
     <button type="button" className="mobile-menu-toggle" aria-label={lang === 'en' ? 'Open navigation' : '打开导航'} aria-expanded={navOpen} aria-controls="workspace-navigation" onClick={() => setNavOpen(true)}><Menu size={22}/></button>
     {navOpen && <button type="button" className="sidebar-scrim" aria-label="关闭导航" onClick={() => setNavOpen(false)}/>}
-    <header className={`header miji-sidebar ${navOpen ? 'is-open' : ''}`} id="workspace-navigation">
-      <div className="sidebar-brand"><button type="button" className="brand-home" onClick={() => navigate('home')} aria-label="米叽工作台"><Logo /></button><button type="button" className="mobile-menu-close" aria-label="关闭导航" onClick={() => setNavOpen(false)}><X size={20}/></button></div>
+    <header className={`header miji-sidebar ${navOpen ? 'is-open' : ''} ${sidebarCollapsed ? 'is-collapsed' : ''}`} id="workspace-navigation">
+      <div className="sidebar-brand"><button type="button" className="brand-home" onClick={() => navigate('home')} aria-label="米叽工作台"><Logo /></button><button type="button" className="sidebar-collapse-toggle" aria-label={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} title={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} onClick={onSidebarToggle}>{sidebarCollapsed ? <PanelLeftOpen size={19}/> : <PanelLeftClose size={19}/>}</button><button type="button" className="mobile-menu-close" aria-label="关闭导航" onClick={() => setNavOpen(false)}><X size={20}/></button></div>
       <nav aria-label={lang === 'en' ? 'Main navigation' : '主导航'}>
         <button aria-current={page === 'home' ? 'page' : undefined} className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}><Mic size={23} strokeWidth={1.6}/><span>{lang === 'en' ? 'Transcription' : '听写工作台'}</span></button>
         <button aria-current={page === 'download' ? 'page' : undefined} className={page === 'download' ? 'active' : ''} onClick={() => navigate('download')}><Download size={23} strokeWidth={1.6}/><span>{lang === 'en' ? 'Video downloads' : '视频下载'}</span></button>
@@ -348,6 +348,10 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
   const coverUrl = `/api/tasks/${task.id}/cover`
   const audioUrl = `/api/tasks/${task.id}/audio`
   const playbackAudioSrc = `/api/tasks/${task.id}/playback-audio?v=${mediaRetryCount}`
+  // Use the refreshed signed URL directly for remote playback. The authenticated
+  // media endpoint remains the fallback for local files and prepared previews;
+  // direct playback avoids browsers dropping range requests across a 307 chain.
+  const videoSource = remoteVideo && task.playback_url ? task.playback_url : mediaSrc
   const syncPlaybackAudio = () => {
     const video = mediaRef.current
     const audio = playbackAudioRef.current
@@ -367,7 +371,7 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
         {task.source_available && mediaMode !== 'failed'
           ? mediaMode === 'preparing'
             ? <div className="source-pending"><LoaderCircle className="spin" size={25}/><b>正在准备视频…</b></div>
-            : <><video key={`${mediaSrc}-${mediaRetryCount}`} ref={mediaRef} className="source-video" style={{'--video-ratio': videoRatio}} controls muted={remoteVideo && task.playback_audio_available} poster={task.cover_available ? coverUrl : undefined} src={mediaSrc} onPlay={startPlaybackAudio} onPause={stopPlaybackAudio} onSeeking={syncPlaybackAudio} onTimeUpdate={syncPlaybackAudio} onEnded={stopPlaybackAudio} onLoadedMetadata={event => {
+            : <><video key={`${videoSource}-${mediaRetryCount}`} ref={mediaRef} className="source-video" style={{'--video-ratio': videoRatio}} controls playsInline preload="metadata" muted={remoteVideo && task.playback_audio_available} poster={task.cover_available ? coverUrl : undefined} src={videoSource} onPlay={startPlaybackAudio} onPause={stopPlaybackAudio} onSeeking={syncPlaybackAudio} onTimeUpdate={syncPlaybackAudio} onEnded={stopPlaybackAudio} onLoadedMetadata={event => {
             const {videoWidth, videoHeight} = event.currentTarget
             if (videoWidth > 0 && videoHeight > 0) setVideoRatio(videoWidth / videoHeight)
           }} onError={onMediaError}/>{remoteVideo && task.playback_audio_available && <audio key={playbackAudioSrc} ref={playbackAudioRef} src={playbackAudioSrc} onLoadedMetadata={syncPlaybackAudio} onError={() => { if (mediaRef.current) mediaRef.current.muted = false }} style={{display: 'none'}}/>}</>
@@ -1096,6 +1100,7 @@ function App() {
   }
   const [lang, setLang] = useState(() => window.localStorage.getItem('tingjian-language') === 'en' ? 'en' : 'zh')
   const [theme, setTheme] = useState(() => ['light', 'dark', 'system'].includes(window.localStorage.getItem('tingjian-theme')) ? window.localStorage.getItem('tingjian-theme') : 'light')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('miji-sidebar-collapsed') === 'true')
   const [tasks, setTasks] = useState([])
   const [selected, setSelected] = useState(null)
   const [importing, setImporting] = useState(false)
@@ -1142,6 +1147,7 @@ function App() {
   useEffect(() => { api.me().then(async me => { setUser(me); await refresh() }).catch(() => setUser(null)) }, [refresh])
   const changeLanguage = value => { setLang(value); window.localStorage.setItem('tingjian-language', value) }
   const changeTheme = value => { setTheme(value); window.localStorage.setItem('tingjian-theme', value) }
+  const toggleSidebar = () => setSidebarCollapsed(current => { const next = !current; window.localStorage.setItem('miji-sidebar-collapsed', String(next)); return next })
   useEffect(() => { if (user) importPendingUrl() }, [user, importPendingUrl])
   useEffect(() => {
     if (!user || !tasks.some(t => !['completed','failed'].includes(t.status))) return
@@ -1150,7 +1156,7 @@ function App() {
   if (user === undefined) return <main className="loading-page"><LoaderCircle className="spin"/>加载中</main>
   if (!user) return <Login lang={lang} onLanguageChange={changeLanguage} onLogin={async me => { setUser(me); await refresh() }}/>
   const open = id => { if (setPage('detail')) setSelected(id) }
-  return <div className={`app miji-app page-${page}`}><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { if (unsavedRef.current && !window.confirm('有尚未保存的文案修改，确定退出吗？')) return; unsavedRef.current = false; await api.logout(); setUser(null) }}/>
+  return <div className={`app miji-app page-${page} ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''}`}><Header page={page} setPage={setPage} user={user} lang={lang} theme={theme} onThemeChange={changeTheme} onLanguageChange={changeLanguage} onLogout={async () => { if (unsavedRef.current && !window.confirm('有尚未保存的文案修改，确定退出吗？')) return; unsavedRef.current = false; await api.logout(); setUser(null) }} sidebarCollapsed={sidebarCollapsed} onSidebarToggle={toggleSidebar}/>
     {(page === 'home' || page === 'download') && <WorkspaceHome key={page} kind={page === 'download' ? 'download' : 'transcribe'} tasks={tasks} refresh={refresh} onOpen={open} onHistory={() => setPage('history')} renderStatus={task => <StatusMark task={task} lang={lang}/>} lang={lang}/>}
     {page === 'history' && <main className="shell history-page"><div className="history-heading"><History/><div><h1>{lang === 'en' ? 'History' : '历史记录'}</h1><p>{lang === 'en' ? 'Your transcripts, AI analysis, and download tasks are saved here.' : '你的听写稿、AI 分析和下载任务都保存在这里。'}</p></div></div><TaskTable tasks={tasks} onOpen={open} onDelete={removeTask} full lang={lang}/></main>}
     {page === 'membership' && <MembershipPage lang={lang} onBack={() => setPage('home')}/>}
