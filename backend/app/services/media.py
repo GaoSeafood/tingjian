@@ -23,7 +23,6 @@ ALLOWED_HOST_SUFFIXES = (
     "youtu.be", "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn",
     "tiktok.com", "instagram.com", "twitter.com", "x.com",
     "kuaishou.com", "kuaishou.cn", "gifshow.com",
-    "vimeo.com", "dailymotion.com", "dai.ly", "reddit.com", "redd.it", "twitch.tv",
 )
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -103,10 +102,6 @@ def source_platform_label(url: str | None) -> str:
         (("weibo.com", "weibo.cn"), "微博"),
         (("instagram.com",), "Instagram"),
         (("twitter.com", "x.com"), "X / Twitter"),
-        (("vimeo.com",), "Vimeo"),
-        (("dailymotion.com", "dai.ly"), "Dailymotion"),
-        (("reddit.com", "redd.it"), "Reddit"),
-        (("twitch.tv",), "Twitch"),
         (("oceanengine.com",), "抖音"),
         (("qq.com", "qpic.cn", "qlogo.cn", "weixin.qq.com", "wechat.com"), "腾讯/微信"),
     )
@@ -124,7 +119,26 @@ def _cookie_file_for_url(url: str) -> str | None:
     is_douyin = host == "douyin.com" or host.endswith(".douyin.com") or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")
     if is_douyin and settings.douyin_cookie_file.is_file() and settings.douyin_cookie_file.stat().st_size > 0:
         return str(settings.douyin_cookie_file)
+    is_youtube = host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be" or host.endswith(".youtu.be")
+    if is_youtube and settings.youtube_cookie_file.is_file() and settings.youtube_cookie_file.stat().st_size > 0:
+        return str(settings.youtube_cookie_file)
     return None
+
+
+def _browser_user_agent_for_url(url: str) -> str | None:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    path = settings.douyin_user_agent_file
+    if host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be" or host.endswith(".youtu.be"):
+        path = settings.youtube_user_agent_file
+    elif not (host == "douyin.com" or host.endswith(".douyin.com") or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")):
+        return None
+    if not path.is_file():
+        return None
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value if len(value) <= 512 and all(marker in value for marker in ("Mozilla/5.0", "AppleWebKit/", "Chrome/", "Safari/")) else None
 
 
 def _douyin_browser_user_agent(url: str) -> str | None:
@@ -625,12 +639,22 @@ def _yt_dlp_options(url: str, *, use_douyin_cookies: bool = True, **overrides) -
             "Accept": "*/*",
         },
     }
-    cookie_file = _cookie_file_for_url(url) if use_douyin_cookies else None
+    cookie_file = _cookie_file_for_url(url) if use_douyin_cookies or _is_youtube_url(url) else None
     if cookie_file:
         options["cookiefile"] = cookie_file
-        options["http_headers"]["User-Agent"] = _douyin_browser_user_agent(url) or options["http_headers"]["User-Agent"]
+        options["http_headers"]["User-Agent"] = _browser_user_agent_for_url(url) or options["http_headers"]["User-Agent"]
+    if _is_youtube_url(url) and settings.youtube_pot_provider_url:
+        options["extractor_args"] = {
+            "youtubepot-bgutilhttp": {"base_url": [settings.youtube_pot_provider_url]},
+            "youtube": {"player_client": ["mweb", "tv", "web_safari"]},
+        }
     options.update(overrides)
     return options
+
+
+def _is_youtube_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be" or host.endswith(".youtu.be")
 
 
 def is_direct_media_url(url: str) -> bool:

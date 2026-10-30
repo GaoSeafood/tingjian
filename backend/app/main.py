@@ -730,6 +730,40 @@ async def upload_douyin_cookies(
     }
 
 
+@app.get("/api/settings/youtube-cookies")
+def get_youtube_cookie_status(user: User = Depends(admin_only)):
+    path = settings.youtube_cookie_file
+    return {"configured": path.is_file() and path.stat().st_size > 0,
+            "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat() if path.is_file() else None,
+            "user_agent_configured": settings.youtube_user_agent_file.is_file()}
+
+
+@app.post("/api/settings/youtube-cookies")
+async def upload_youtube_cookies(cookies: UploadFile = File(...), user_agent: str = Form(""), user: User = Depends(admin_only)):
+    raw = await cookies.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise HTTPException(413, "Cookie 文件不能超过 1MB")
+    try:
+        text_content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(400, "Cookie 文件必须是 UTF-8 文本") from exc
+    lines = [line.strip() for line in text_content.splitlines() if line.strip() and (not line.lstrip().startswith("#") or line.lstrip().startswith("#HttpOnly_"))]
+    if not lines or not any(line.removeprefix("#HttpOnly_").count("\t") >= 6 for line in lines):
+        raise HTTPException(400, "请上传浏览器导出的 Netscape 格式 YouTube Cookie 文件")
+    if user_agent and (len(user_agent) > 512 or not all(marker in user_agent for marker in ("Mozilla/5.0", "AppleWebKit/", "Chrome/", "Safari/"))):
+        raise HTTPException(400, "浏览器标识格式不正确")
+    path = settings.youtube_cookie_file
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_text(text_content, encoding="utf-8"); temp.chmod(0o600); temp.replace(path); path.chmod(0o600)
+        if user_agent:
+            ua = settings.youtube_user_agent_file; ua_temp = ua.with_name(f".{ua.name}.{uuid.uuid4().hex}.tmp")
+            ua_temp.write_text(user_agent.strip() + "\n", encoding="utf-8"); ua_temp.chmod(0o600); ua_temp.replace(ua); ua.chmod(0o600)
+    finally:
+        temp.unlink(missing_ok=True)
+    return get_youtube_cookie_status(user)
+
+
 @app.get("/api/tasks")
 def list_tasks(user: User = Depends(current_user), db: Session = Depends(get_db)):
     # Repair legacy tasks and missed delayed jobs whenever history is opened.
