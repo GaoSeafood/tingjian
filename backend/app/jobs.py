@@ -68,11 +68,13 @@ def transcribe_task(task_id: str):
         duration = 0.0
         try:
             _update(db, task, status="preparing", progress=5, message="正在准备视频", error=None)
+            account = db.get(User, task.user_id)
+            use_youtube_cookies = bool(account and account.role == "admin")
             audio_only = False
             if task.source_type == "url" and task.extraction_mode == "prefer_subtitles":
                 _update(db, task, progress=6, message="正在检查原视频的可用字幕")
                 try:
-                    subtitles = fetch_subtitles(task.source_url or "")
+                    subtitles = fetch_subtitles(task.source_url or "", use_youtube_cookies=use_youtube_cookies)
                 except Exception:
                     # Missing/private/changed subtitles must not block ASR.
                     subtitles = None
@@ -89,7 +91,7 @@ def transcribe_task(task_id: str):
                     return
             if task.source_type == "url":
                 _update(db, task, status="downloading", progress=8, message="正在准备听写音频和播放地址")
-                media_path, title, audio_only, playback_url, playback_audio_url = download_video(task.source_url or "", task_dir)
+                media_path, title, audio_only, playback_url, playback_audio_url = download_video(task.source_url or "", task_dir, use_youtube_cookies=use_youtube_cookies)
                 task.media_path, task.title = str(media_path), title
                 task.source_playback_url = playback_url
                 task.source_playback_audio_url = playback_audio_url
@@ -216,6 +218,7 @@ def download_source_task(task_id: str):
             media_path, title = download_original_video(
                 task.source_url or "", task_dir, report_progress,
                 use_douyin_cookies=bool(account and account.role == "admin"),
+                use_youtube_cookies=bool(account and account.role == "admin"),
             )
             try:
                 duration = probe_duration(media_path)
@@ -267,7 +270,9 @@ def analyze_visual_task(task_id: str):
             media_path = Path(task.media_path or "")
             if (not media_path.is_file() or media_kind(media_path) == "audio") and task.source_type == "url" and task.source_url:
                 temporary_dir = settings.data_dir / "tasks" / task.id / "visual-source"
-                media_path, _ = download_original_video(task.source_url, temporary_dir, use_douyin_cookies=True)
+                account = db.get(User, task.user_id)
+                media_path, _ = download_original_video(task.source_url, temporary_dir, use_douyin_cookies=True,
+                    use_youtube_cookies=bool(account and account.role == "admin"))
             if not media_path.is_file() or media_kind(media_path) == "audio":
                 raise RuntimeError("没有可用的视频画面，无法分析")
             result = analyze_visuals(task.title, task.transcript_text or "", task.segments or [], media_path, settings.data_dir / "tasks" / task.id)

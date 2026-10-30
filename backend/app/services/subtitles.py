@@ -109,18 +109,20 @@ def _track_text(session, url):
     raise ValueError("字幕重定向次数过多")
 
 
-def fetch_subtitles(url: str) -> SubtitleResult | None:
+def fetch_subtitles(url: str, *, use_youtube_cookies: bool = False) -> SubtitleResult | None:
     host = (urlparse(url).hostname or "").lower().rstrip(".")
     if not any(host == s or host.endswith("." + s) for s in PAGE_HOSTS):
         return None
     validate_public_url(url)
-    options = _yt_dlp_options(url, skip_download=True, socket_timeout=15, retries=0,
+    options = _yt_dlp_options(url, use_youtube_cookies=use_youtube_cookies, skip_download=True, socket_timeout=15, retries=0,
         extractor_retries=0, logger=QuietLogger())
     with yt_dlp.YoutubeDL(options) as ydl:
         info = ydl.extract_info(url, download=False)
     if not isinstance(info, dict) or info.get("_type") in {"playlist", "multi_video"}:
         return None
     with requests.Session() as session:
+        session.headers.update(options.get("http_headers") or {})
+        session.cookies.update(ydl.cookiejar)
         for key, source in (("subtitles", "author_subtitles"), ("automatic_captions", "automatic_subtitles")):
             tracks = info.get(key) or {}
             languages = sorted(tracks, key=lambda lang: (not lang.startswith("zh"), not lang.startswith("en"), lang))

@@ -26,6 +26,7 @@ from .jobs import analyze_visual_task, cleanup_expired_sources, download_source_
 from .models import AIFeatureUsage, BillingOrder, Plan, Task, UsageLedger, User, UserAPIKey, UserEntitlement, WorkspaceVersion, utcnow
 from .workspace import RESULT_FIELDS, save_result
 from .provider_config import provider_config, public_provider_config, update_provider_config
+from .services import youtube_access
 from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, _direct_media_suffix, delete_source, ensure_cover_image, ensure_remote_cover_image, extract_video_url, is_direct_media_url, is_direct_video_url, media_kind, source_platform_label
 from .worker import enqueue
 
@@ -732,10 +733,7 @@ async def upload_douyin_cookies(
 
 @app.get("/api/settings/youtube-cookies")
 def get_youtube_cookie_status(user: User = Depends(admin_only)):
-    path = settings.youtube_cookie_file
-    return {"configured": path.is_file() and path.stat().st_size > 0,
-            "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat() if path.is_file() else None,
-            "user_agent_configured": settings.youtube_user_agent_file.is_file()}
+    return youtube_access.access_status()
 
 
 @app.post("/api/settings/youtube-cookies")
@@ -744,24 +742,16 @@ async def upload_youtube_cookies(cookies: UploadFile = File(...), user_agent: st
     if len(raw) > 1024 * 1024:
         raise HTTPException(413, "Cookie 文件不能超过 1MB")
     try:
-        text_content = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(400, "Cookie 文件必须是 UTF-8 文本") from exc
-    lines = [line.strip() for line in text_content.splitlines() if line.strip() and (not line.lstrip().startswith("#") or line.lstrip().startswith("#HttpOnly_"))]
-    if not lines or not any(line.removeprefix("#HttpOnly_").count("\t") >= 6 for line in lines):
-        raise HTTPException(400, "请上传浏览器导出的 Netscape 格式 YouTube Cookie 文件")
-    if user_agent and (len(user_agent) > 512 or not all(marker in user_agent for marker in ("Mozilla/5.0", "AppleWebKit/", "Chrome/", "Safari/"))):
-        raise HTTPException(400, "浏览器标识格式不正确")
-    path = settings.youtube_cookie_file
-    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temp.write_text(text_content, encoding="utf-8"); temp.chmod(0o600); temp.replace(path); path.chmod(0o600)
-        if user_agent:
-            ua = settings.youtube_user_agent_file; ua_temp = ua.with_name(f".{ua.name}.{uuid.uuid4().hex}.tmp")
-            ua_temp.write_text(user_agent.strip() + "\n", encoding="utf-8"); ua_temp.chmod(0o600); ua_temp.replace(ua); ua.chmod(0o600)
-    finally:
-        temp.unlink(missing_ok=True)
-    return get_youtube_cookie_status(user)
+        youtube_access.save_cookies(raw, user_agent)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return youtube_access.access_status()
+
+
+@app.delete("/api/settings/youtube-cookies")
+def delete_youtube_cookies(user: User = Depends(admin_only)):
+    youtube_access.delete_cookies()
+    return youtube_access.access_status()
 
 
 @app.get("/api/tasks")

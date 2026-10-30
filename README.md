@@ -57,6 +57,14 @@ docker compose up -d --build
 
 服务默认只监听 `127.0.0.1:18092`。在 Tailscale 服务器上可将 `APP_BIND` 设置为该服务器的 Tailscale IPv4，避免直接暴露到公网。需要公网访问时，建议在前面加 Caddy/Nginx，使用 HTTPS 域名反向代理到应用端口。不要把生产域名、服务器地址或密钥写进仓库。
 
+## YouTube 访问
+
+YouTube 提取使用 Node.js、yt-dlp EJS 和固定版本 bgutil PO Token Provider。新部署通过 Compose 内网连接访问组件，不发布 4416 端口。组件正常运行并不保证能通过数据中心出口的登录验证。
+
+如出现“要求登录验证”，管理员可在“管理后台 → 系统设置 → YouTube 访问”上传自己主动导出的 Netscape 格式 YouTube cookies.txt，并重试任务。仅保留有效的 youtube.com 域 Cookie，文件权限为 0600；API 不回显内容，支持移除。该登录态只用于管理员自己的字幕、听写、视频下载和画面分析任务，普通用户不会借用管理员账号访问受限内容。上传成功仅表示文件已保存，仍需真实链接验证可用性。
+
+已有独立部署配置的安装，不要用仓库 Compose 覆盖生产配置。可用 `docker compose -p tingjian-youtube -f ops/youtube-provider.compose.yml up -d` 在现有 `tingjian_default` 网络启动访问组件（其他网络名通过 `TINGJIAN_NETWORK` 指定），在原应用的 web、worker、worker-ai 配置中增加 `YOUTUBE_POT_PROVIDER_URL=http://bgutil-provider:4416`，然后仅更新这三个应用服务。保留原 `.env`、数据库、Redis 和媒体卷。独立部署助手只更新应用镜像，不会自动应用这些额外配置；部署后应检查后台组件状态与真实链接结果。
+
 ## 安全说明
 
 - `.env` 不进入版本库，不要在聊天、截图或日志中公开任何 API Key。

@@ -76,6 +76,7 @@ export const api = {
     return request('/api/settings/douyin-cookies', { method: 'POST', body: form })
   },
   youtubeCookieStatus: () => request('/api/settings/youtube-cookies'),
+  deleteYoutubeCookies: () => request('/api/settings/youtube-cookies', { method: 'DELETE' }),
   uploadYoutubeCookies: (file) => {
     const form = new FormData(); form.append('cookies', file)
     return request('/api/settings/youtube-cookies', { method: 'POST', body: form })
