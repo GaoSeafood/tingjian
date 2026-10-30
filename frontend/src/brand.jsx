@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { ArrowRight, CircleHelp, X } from 'lucide-react'
 
 export function BrandLogo() {
-  return <span className="brand-lockup"><img src="/brand/miji-logo.png" alt="米叽 MIJI" width="2172" height="724" /></span>
+  return <span className="brand-lockup"><img className="brand-wordmark" src="/brand/miji-logo.png" alt="米叽 MIJI" width="1000" height="333" /><img className="brand-mark" src="/brand/miji-mark.png" alt="米叽" width="1254" height="1254" /></span>
 }
 
 export function HelpDialog({ open, onClose, lang = 'zh' }) {

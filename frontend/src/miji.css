@@ -8,6 +8,7 @@
   --soft: #f8f4ee;
   --coral: #ad4f2c;
   --coral-soft: #f7e3d4;
+  --sidebar-surface: #f4eadc;
   --brand-button: #ad4f2c;
   --sidebar-width: 224px;
   color: var(--ink);
@@ -23,6 +24,7 @@
   --soft: #352e28;
   --coral: #efa87c;
   --coral-soft: #493025;
+  --sidebar-surface: #2c2520;
 }
 body { background: var(--paper); color: var(--ink); }
 button, input, textarea, select, summary { font: inherit; }
@@ -30,8 +32,9 @@ button:disabled { cursor: not-allowed; }
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--coral); outline-offset: 4px; }
 input, textarea, select { accent-color: var(--brand-button); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.miji-app { min-height: 100dvh; padding-left: var(--sidebar-width); background: var(--paper); color: var(--ink); transition: padding-left .2s ease; }
+.miji-app { min-height: 100dvh; padding-left: var(--sidebar-width); background: #fff; color: var(--ink); transition: padding-left .2s ease; }
 .miji-app.sidebar-is-collapsed { --sidebar-width: 72px; }
+:root[data-theme="dark"] .miji-app { background: #181818; }
 .miji-app > .shell { width: min(1280px, calc(100% - 72px)); }
 .miji-app .primary, .miji-help .primary, .login-panel .primary { background: var(--brand-button); color: #fff; border: 1px solid transparent; border-radius: 999px; box-shadow: none; }
 .miji-app .primary:hover:not(:disabled), .miji-help .primary:hover, .login-panel .primary:hover:not(:disabled) { background: #914023; }
@@ -41,14 +44,13 @@ input, textarea, select { accent-color: var(--brand-button); }
 .miji-app .miji-sidebar {
   position: fixed; inset: 0 auto 0 0; width: var(--sidebar-width); height: 100dvh;
   padding: 30px 14px 18px; z-index: 35; display: flex; flex-direction: column;
-  gap: 0; background: var(--paper); border: 0; border-right: 1px solid var(--line); transition: width .2s ease, padding .2s ease;
+  gap: 0; background: var(--sidebar-surface); border: 0; border-right: 1px solid var(--line); transition: width .2s ease, padding .2s ease;
 }
 .sidebar-brand { min-height: 127px; display: flex; align-items: flex-start; }
 .brand-home { display: block; padding: 0; max-width: 100%; }
-.sidebar-collapse-toggle { position: absolute; top: 19px; right: 11px; width: 30px; height: 30px; display: grid; place-items: center; color: var(--muted); border-radius: 8px; }
-.sidebar-collapse-toggle:hover { color: var(--coral); background: var(--coral-soft); }
 .brand-lockup { display: block; width: 219px; height: 92px; overflow: hidden; }
 .brand-lockup img { display: block; width: 280px; height: auto; max-width: none; margin: -5px 0 0 -38px; }
+.brand-lockup .brand-mark { display: none; width: 48px; height: 48px; margin: 0; object-fit: contain; }
 .miji-sidebar nav { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .miji-sidebar nav button { display: flex; align-items: center; gap: 18px; min-height: 56px; padding: 12px 20px; border-radius: 12px; font-size: 17px; text-align: left; color: var(--ink); }
 .miji-sidebar nav button:hover { background: var(--soft); }
@@ -77,8 +79,8 @@ input, textarea, select { accent-color: var(--brand-button); }
 .miji-sidebar.is-collapsed { padding-inline: 10px; }
 .miji-sidebar.is-collapsed .sidebar-brand { justify-content: center; }
 .miji-sidebar.is-collapsed .brand-lockup { width: 56px; }
-.miji-sidebar.is-collapsed .brand-lockup img { margin-left: -38px; }
-.miji-sidebar.is-collapsed .sidebar-collapse-toggle { right: 3px; }
+.miji-sidebar.is-collapsed .brand-lockup .brand-wordmark { display: none; }
+.miji-sidebar.is-collapsed .brand-lockup .brand-mark { display: block; }
 .miji-sidebar.is-collapsed nav button { justify-content: center; gap: 0; padding-inline: 0; }
 .miji-sidebar.is-collapsed nav button span,
 .miji-sidebar.is-collapsed .sidebar-help span,
@@ -360,11 +362,11 @@ input, textarea, select { accent-color: var(--brand-button); }
 @media (max-width: 760px) {
   :root { --sidebar-width: 0px; }
   .miji-app, .page-detail { padding-left: 0; --sidebar-width: 0px; }
-  .sidebar-collapse-toggle { display: none; }
   .miji-app .miji-sidebar { width: 248px; transform: translateX(-100%); transition: transform .2s ease; border-right: 1px solid var(--line); }
   .miji-app .miji-sidebar.is-open { transform: translateX(0); }
   .miji-sidebar .brand-lockup { width: 205px; }
   .miji-sidebar .brand-lockup img { width: 280px; margin-left: -38px; }
+  .miji-sidebar .brand-lockup .brand-mark { width: 48px; height: 48px; margin: 0; }
   .sidebar-brand { min-height: 118px; align-items: flex-start; }
   .mobile-menu-toggle { position: absolute; top: 21px; left: 18px; width: 34px; height: 34px; display: grid; place-items: center; color: var(--ink); z-index: 25; }
   .mobile-menu-close { display: grid; place-items: center; position: absolute; top: 5px; right: 5px; width: 30px; height: 30px; color: var(--muted); }

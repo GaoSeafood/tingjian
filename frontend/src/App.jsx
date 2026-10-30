@@ -4,7 +4,7 @@ import {
   History, LoaderCircle, LockKeyhole, LogOut, PencilLine,
   RotateCcw, Search, Sparkles, Trash2, Upload, UserRound, WandSparkles, X,
   SlidersHorizontal, Save, Languages, ChevronDown, KeyRound, Layers3, Sun, Moon, Monitor,
-  LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards, Menu, Mic, CircleHelp, PanelLeftClose, PanelLeftOpen,
+  LayoutDashboard, Users, ReceiptText, Bot, Settings, Activity, WalletCards, Menu, Mic, CircleHelp,
 } from 'lucide-react'
 import { api } from './api'
 import WorkspaceHistory from './WorkspaceHistory'
@@ -132,7 +132,7 @@ function Header({ page, setPage, user, lang, theme, onThemeChange, onLanguageCha
     <button type="button" className="mobile-menu-toggle" aria-label={lang === 'en' ? 'Open navigation' : '打开导航'} aria-expanded={navOpen} aria-controls="workspace-navigation" onClick={() => setNavOpen(true)}><Menu size={22}/></button>
     {navOpen && <button type="button" className="sidebar-scrim" aria-label="关闭导航" onClick={() => setNavOpen(false)}/>}
     <header className={`header miji-sidebar ${navOpen ? 'is-open' : ''} ${sidebarCollapsed ? 'is-collapsed' : ''}`} id="workspace-navigation">
-      <div className="sidebar-brand"><button type="button" className="brand-home" onClick={() => navigate('home')} aria-label="米叽工作台"><Logo /></button><button type="button" className="sidebar-collapse-toggle" aria-label={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} title={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} onClick={onSidebarToggle}>{sidebarCollapsed ? <PanelLeftOpen size={19}/> : <PanelLeftClose size={19}/>}</button><button type="button" className="mobile-menu-close" aria-label="关闭导航" onClick={() => setNavOpen(false)}><X size={20}/></button></div>
+      <div className="sidebar-brand"><button type="button" className="brand-home" onClick={() => { if (window.matchMedia('(max-width: 760px)').matches) navigate('home'); else onSidebarToggle() }} aria-label={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} title={sidebarCollapsed ? '展开导航栏' : '收起导航栏'}><Logo /></button><button type="button" className="mobile-menu-close" aria-label="关闭导航" onClick={() => setNavOpen(false)}><X size={20}/></button></div>
       <nav aria-label={lang === 'en' ? 'Main navigation' : '主导航'}>
         <button aria-current={page === 'home' ? 'page' : undefined} className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}><Mic size={23} strokeWidth={1.6}/><span>{lang === 'en' ? 'Transcription' : '听写工作台'}</span></button>
         <button aria-current={page === 'download' ? 'page' : undefined} className={page === 'download' ? 'active' : ''} onClick={() => navigate('download')}><Download size={23} strokeWidth={1.6}/><span>{lang === 'en' ? 'Video downloads' : '视频下载'}</span></button>
