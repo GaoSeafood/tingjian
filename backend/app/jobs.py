@@ -3,14 +3,17 @@ from pathlib import Path
 from urllib.parse import urlparse
 import re
 import shutil
+import uuid
 
 from sqlalchemy import and_, or_, select
 
 from .config import settings
 from .database import SessionLocal
-from .models import Task, User, utcnow
+from .models import Task, User, WorkspaceVersion, utcnow
 from .services.asr import ASRClient
-from .services.llm import find_highlights, rewrite_script, summarize_transcript, translate_transcript
+from .services.llm import answer_question, find_highlights, rewrite_script, summarize_transcript, translate_transcript
+from .services.subtitles import fetch_subtitles
+from .workspace import save_result
 from .services.media import AUDIO_SUFFIXES, _direct_media_suffix, download_original_video, download_video, ensure_browser_preview, ensure_cover_image, ensure_download_audio, extract_audio, media_kind, probe_duration, split_audio
 from .services.vision import analyze_visuals
 
@@ -29,10 +32,11 @@ def _update(db, task: Task, **values):
 
 def _schedule_cleanup(task_id: str, delay: timedelta):
     from .worker import queue
-    queue.enqueue_in(
-        delay, cleanup_source_task, task_id,
-        job_timeout=300, result_ttl=3600,
-    )
+    try:
+        queue.enqueue_in(delay, cleanup_source_task, task_id, job_timeout=300, result_ttl=3600)
+    except Exception:
+        # The persisted deadline and periodic sweep remain the cleanup fallback.
+        pass
 
 
 def _needs_title_repair(title: str | None) -> bool:
@@ -65,6 +69,24 @@ def transcribe_task(task_id: str):
         try:
             _update(db, task, status="preparing", progress=5, message="正在准备视频", error=None)
             audio_only = False
+            if task.source_type == "url" and task.extraction_mode == "prefer_subtitles":
+                _update(db, task, progress=6, message="正在检查原视频的可用字幕")
+                try:
+                    subtitles = fetch_subtitles(task.source_url or "")
+                except Exception:
+                    # Missing/private/changed subtitles must not block ASR.
+                    subtitles = None
+                if subtitles:
+                    duration = subtitles.duration
+                    reserve_minutes(db, task, duration)
+                    _update(db, task, title=subtitles.title, duration=duration,
+                        transcript_text="\n".join(s["text"] for s in subtitles.segments), segments=subtitles.segments,
+                        transcript_source=subtitles.source, transcript_language=subtitles.language,
+                        asr_provider="subtitles", status="completed", progress=100, message="已提取原视频字幕",
+                        source_delete_at=utcnow() + timedelta(hours=settings.source_retention_hours))
+                    settle_minutes(db, task.id, duration, success=True)
+                    _schedule_cleanup(task.id, timedelta(hours=settings.source_retention_hours))
+                    return
             if task.source_type == "url":
                 _update(db, task, status="downloading", progress=8, message="正在准备听写音频和播放地址")
                 media_path, title, audio_only, playback_url, playback_audio_url = download_video(task.source_url or "", task_dir)
@@ -154,6 +176,7 @@ def transcribe_task(task_id: str):
             _update(
                 db, task, status="completed", progress=100, message="听写完成",
                 transcript_text="\n".join(text_parts), segments=segments,
+                transcript_source="asr", transcript_language=task.language,
                 source_delete_at=utcnow() + timedelta(hours=settings.source_retention_hours),
             )
             settle_minutes(db, task.id, duration, success=True)
@@ -223,7 +246,8 @@ def highlight_task(task_id: str):
         try:
             _update(db, task, ai_status="highlighting", ai_message="Gemini 正在寻找亮点")
             highlights = find_highlights(task.title, task.segments or [], task.visual_analysis or [])
-            _update(db, task, highlights=highlights, ai_status="idle", ai_message="亮点分析完成")
+            save_result(db, task, "highlights", {"value": highlights})
+            _update(db, task, ai_status="idle", ai_message="亮点分析完成")
             settle_ai_use(db, task.id, "highlights", True)
         except Exception as exc:
             db.rollback()
@@ -247,7 +271,8 @@ def analyze_visual_task(task_id: str):
             if not media_path.is_file() or media_kind(media_path) == "audio":
                 raise RuntimeError("没有可用的视频画面，无法分析")
             result = analyze_visuals(task.title, task.transcript_text or "", task.segments or [], media_path, settings.data_dir / "tasks" / task.id)
-            _update(db, task, visual_analysis=result, visual_status="completed", visual_message="画面分析完成")
+            save_result(db, task, "visual", {"value": result})
+            _update(db, task, visual_status="completed", visual_message="画面分析完成")
             settle_ai_use(db, task.id, "visual", True)
         except Exception as exc:
             db.rollback()
@@ -267,7 +292,8 @@ def rewrite_task(task_id: str, direction: str):
         try:
             _update(db, task, ai_status="rewriting", ai_message="Gemini 正在改编文案")
             result = rewrite_script(task.title, task.transcript_text or "", direction)
-            _update(db, task, rewrite_text=result, ai_status="idle", ai_message="改编完成")
+            save_result(db, task, "rewrite", {"value": result, "direction": direction})
+            _update(db, task, ai_status="idle", ai_message="改编完成")
             settle_ai_use(db, task.id, "rewrite", True)
         except Exception as exc:
             db.rollback()
@@ -284,7 +310,8 @@ def summarize_task(task_id: str):
         try:
             _update(db, task, ai_status="summarizing", ai_message="正在总结视频文案")
             result = summarize_transcript(task.title, task.transcript_text or "")
-            _update(db, task, summary_text=result, ai_status="idle", ai_message="文案总结完成")
+            save_result(db, task, "summary", {"value": result})
+            _update(db, task, ai_status="idle", ai_message="文案总结完成")
             settle_ai_use(db, task.id, "summary", True)
         except Exception as exc:
             db.rollback()
@@ -301,12 +328,32 @@ def translate_task(task_id: str, language: str):
         try:
             _update(db, task, ai_status="translating", ai_message=f"正在翻译为{language}")
             result = translate_transcript(task.title, task.transcript_text or "", language)
-            _update(db, task, translated_text=result, translation_language=language, ai_status="idle", ai_message="文案翻译完成")
+            save_result(db, task, "translate", {"value": result, "language": language})
+            _update(db, task, ai_status="idle", ai_message="文案翻译完成")
             settle_ai_use(db, task.id, "translate", True)
         except Exception as exc:
             db.rollback()
             _update(db, task, ai_status="failed", ai_message=str(exc))
             settle_ai_use(db, task.id, "translate", False)
+
+
+def question_task(task_id: str, question: str):
+    from .billing import settle_ai_use
+    with SessionLocal() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return
+        try:
+            _update(db, task, ai_status="questioning", ai_message="正在查找原文并回答问题")
+            result = answer_question(task.title, task.segments or [], question)
+            db.add(WorkspaceVersion(id=str(uuid.uuid4()), task_id=task.id, kind="answer",
+                content={"question": question, **result}, source_revision=task.transcript_revision or 1))
+            _update(db, task, ai_status="idle", ai_message="视频问答完成")
+            settle_ai_use(db, task.id, "summary", True)
+        except Exception as exc:
+            db.rollback()
+            _update(db, task, ai_status="failed", ai_message=str(exc))
+            settle_ai_use(db, task.id, "summary", False)
 
 
 def cleanup_expired_sources():
@@ -321,7 +368,7 @@ def cleanup_expired_sources():
                 Task.created_at <= legacy_cutoff,
             ),
         )
-        tasks = db.scalars(select(Task).where(expired, Task.media_path.is_not(None))).all()
+        tasks = db.scalars(select(Task).where(expired, or_(Task.media_path.is_not(None), Task.source_delete_at.is_not(None)))).all()
         for task in tasks:
             from .services.media import delete_source
             delete_source(task.media_path)

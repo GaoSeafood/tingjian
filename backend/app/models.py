@@ -66,6 +66,11 @@ class Task(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     asr_provider: Mapped[str] = mapped_column(String(40), default="mimo")
     transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_mode: Mapped[str] = mapped_column(String(24), default="prefer_subtitles", server_default="prefer_subtitles")
+    transcript_source: Mapped[str] = mapped_column(String(24), default="asr", server_default="asr")
+    transcript_language: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    transcript_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    result_revisions: Mapped[dict] = mapped_column(JSON, default=dict)
     segments: Mapped[list] = mapped_column(JSON, default=list)
     highlights: Mapped[list | None] = mapped_column(JSON, nullable=True)
     visual_analysis: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -80,6 +85,18 @@ class Task(Base):
     source_delete_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class WorkspaceVersion(Base):
+    __tablename__ = "workspace_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(24), index=True)
+    content: Mapped[dict] = mapped_column(JSON)
+    source_revision: Mapped[int] = mapped_column(Integer)
+    origin: Mapped[str] = mapped_column(String(20), default="generated")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AppSetting(Base):

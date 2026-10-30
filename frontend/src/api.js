@@ -79,23 +79,34 @@ export const api = {
   refreshPlayback: (id) => request(`/api/tasks/${id}/refresh-playback`, { method: 'POST' }),
   preparePlaybackVideo: (id) => request(`/api/tasks/${id}/prepare-playback-video`, { method: 'POST' }),
   retryTask: (id) => request(`/api/tasks/${id}/retry`, { method: 'POST' }),
+  retranscribe: (id) => request(`/api/tasks/${id}/retranscribe`, { method: 'POST' }),
+  testAI: () => request('/api/settings/providers/test', { method: 'POST' }),
+  versions: (id) => request(`/api/tasks/${id}/versions`),
+  version: (id, version) => request(`/api/tasks/${id}/versions/${version}`),
+  restoreVersion: (id, version) => request(`/api/tasks/${id}/versions/${version}/restore`, { method: 'POST' }),
+  ask: (id, question) => request(`/api/tasks/${id}/questions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }),
+  }),
+  saveRewrite: (id, text, base_version) => request(`/api/tasks/${id}/rewrite`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, base_version }),
+  }),
   upload: (file, language = 'auto') => {
     const form = new FormData()
     form.append('video', file)
     form.append('language', language)
     return request('/api/tasks/upload', { method: 'POST', body: form })
   },
-  url: (url) => request('/api/tasks/url', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+  url: (url, extraction_mode = 'prefer_subtitles') => request('/api/tasks/url', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, extraction_mode }),
   }),
-  batch: (urls) => request('/api/tasks/batch', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls }),
+  batch: (urls, extraction_mode = 'prefer_subtitles') => request('/api/tasks/batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls, extraction_mode }),
   }),
   download: (url) => request('/api/tasks/download', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
   }),
-  saveTranscript: (id, segments) => request(`/api/tasks/${id}/transcript`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segments }),
+  saveTranscript: (id, segments, revision) => request(`/api/tasks/${id}/transcript`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ segments, revision }),
   }),
   highlights: (id) => request(`/api/tasks/${id}/highlights`, { method: 'POST' }),
   summarize: (id) => request(`/api/tasks/${id}/summary`, { method: 'POST' }),
