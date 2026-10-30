@@ -982,6 +982,7 @@ function SettingsPage({ onBack, user, adminView = false }) {
   const [planSelections, setPlanSelections] = useState({})
   const [planDays, setPlanDays] = useState({})
   const [douyinCookies, setDouyinCookies] = useState(null)
+  const [youtubeCookies, setYoutubeCookies] = useState(null)
   const [cookieBusy, setCookieBusy] = useState(false)
   const [providerTestBusy, setProviderTestBusy] = useState(false)
   const [newUser, setNewUser] = useState({username: '', password: ''})
@@ -992,7 +993,7 @@ function SettingsPage({ onBack, user, adminView = false }) {
   const applySiliconFlowPreset = model => setForm(current => ({...current, asr_provider: 'siliconflow', siliconflow_base_url: 'https://api.siliconflow.cn/v1', siliconflow_model: model}))
   useEffect(() => {
     if (user?.role !== 'admin' || !adminView) { setForm({}); return }
-    Promise.all([api.providerSettings(), api.adminUsers(), api.douyinCookieStatus(), api.adminPlans(), api.adminBillingOrders()]).then(([settings, accounts, cookieStatus, planRows, orderRows]) => { setForm(settings); setUsers(accounts); setDouyinCookies(cookieStatus); setPlans(planRows); setBillingOrders(orderRows) }).catch(err => setError(err.message))
+    Promise.all([api.providerSettings(), api.adminUsers(), api.douyinCookieStatus(), api.youtubeCookieStatus(), api.adminPlans(), api.adminBillingOrders()]).then(([settings, accounts, cookieStatus, youtubeStatus, planRows, orderRows]) => { setForm(settings); setUsers(accounts); setDouyinCookies(cookieStatus); setYoutubeCookies(youtubeStatus); setPlans(planRows); setBillingOrders(orderRows) }).catch(err => setError(err.message))
   }, [user, adminView])
   const set = (key, value) => setForm(current => ({...current, [key]: value}))
   const save = async (event) => {
@@ -1059,6 +1060,17 @@ function SettingsPage({ onBack, user, adminView = false }) {
     if (!file) return
     setCookieBusy(true); setMessage(''); setError('')
     try { setDouyinCookies(await api.uploadDouyinCookies(file)); setMessage('抖音 Cookie 已安全保存，新的抖音链接任务会自动使用。') }
+    catch (err) { setError(err.message) } finally { setCookieBusy(false) }
+  }
+  const uploadYoutubeCookies = async (event) => {
+    const file = event.target.files?.[0]; event.target.value = ''; if (!file) return
+    setCookieBusy(true); setMessage(''); setError('')
+    try { setYoutubeCookies(await api.uploadYoutubeCookies(file)); setMessage('YouTube Cookie 已保存，仅用于管理员自己的新任务；请重试之前失败的任务。') }
+    catch (err) { setError(err.message) } finally { setCookieBusy(false) }
+  }
+  const deleteYoutubeCookies = async () => {
+    setCookieBusy(true); setMessage(''); setError('')
+    try { setYoutubeCookies(await api.deleteYoutubeCookies()); setMessage('YouTube 登录态已移除。') }
     catch (err) { setError(err.message) } finally { setCookieBusy(false) }
   }
   const adminNav = [
@@ -1133,6 +1145,10 @@ function SettingsPage({ onBack, user, adminView = false }) {
       <section id="admin-douyin" hidden={adminSection !== 'system'}><div className="settings-section-title"><h2>抖音下载</h2><p>建议使用小号。可用新版 Chrome 扩展同步 Cookie 与浏览器标识，也可上传 Cookie 文件；不保存账号密码。</p></div>
         <div className="cookie-settings"><div><b>{douyinCookies?.configured ? '已配置抖音 Cookie' : '尚未配置抖音 Cookie'}</b><small>{douyinCookies?.configured ? `更新时间：${new Date(douyinCookies.updated_at).toLocaleString()}${douyinCookies.user_agent_configured ? ' · Chrome 标识已同步' : ' · 请更新扩展同步浏览器标识'}` : '抖音链接可能会提示需要新鲜 Cookie'}</small></div><label className="outline cookie-upload"><Upload size={17}/>选择 Cookie 文件<input type="file" accept=".txt,.cookies,text/plain" onChange={uploadCookies} disabled={cookieBusy}/></label></div>
         <p className="settings-note">在同一 Chrome 配置中登录抖音和听见管理后台，然后安装新版“听见抖音 Cookie 同步”扩展，从已登录的抖音页面主动同步。也可上传 Netscape 格式 Cookie 文件。</p>
+      </section>
+      <section id="admin-youtube" hidden={adminSection !== 'system'}><div className="settings-section-title"><h2>YouTube 访问</h2><p>服务器出口触发登录验证时，上传已登录 Chrome 导出的 YouTube cookies.txt。Cookie 仅供管理员自己的任务使用，保存在服务器受限文件中，不会回显。</p></div>
+        <div className="cookie-settings"><div><b>{youtubeCookies?.configured ? '已配置 YouTube Cookie' : '尚未配置 YouTube Cookie'}</b><small>{youtubeCookies?.configured ? `更新时间：${new Date(youtubeCookies.updated_at).toLocaleString()}` : '数据中心 IP 可能需要登录态'}</small></div><label className="outline cookie-upload"><Upload size={17}/>选择 YouTube Cookie<input type="file" accept=".txt,.cookies,text/plain" onChange={uploadYoutubeCookies} disabled={cookieBusy}/></label>{youtubeCookies?.configured && <button className="outline" disabled={cookieBusy} onClick={deleteYoutubeCookies}>移除登录态</button>}</div>
+        <p className="settings-note">在 Chrome 中登录 YouTube，仅导出 YouTube 网站的 Netscape 格式 cookies.txt；文件中的其他网站 Cookie 不会保存。访问组件：{youtubeCookies?.provider_status === 'ready' ? '运行正常' : youtubeCookies?.provider_status === 'unreachable' ? '暂时不可用' : '尚未配置'}。组件运行正常也可能仍需登录验证。</p>
       </section>
       <section id="admin-plans" hidden={adminSection !== 'billing'}><div className="settings-section-title"><h2>商业套餐</h2><p>按月统计听写分钟数；当前在线支付尚未接入，用户提交申请后由管理员确认收款并开通。</p></div>
         <div className="billing-plan-list">{plans.filter(plan => !['admin','legacy'].includes(plan.code)).map(plan => <div className="billing-plan-editor" key={plan.code}>

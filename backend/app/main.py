@@ -26,6 +26,7 @@ from .jobs import analyze_visual_task, cleanup_expired_sources, download_source_
 from .models import AIFeatureUsage, BillingOrder, Plan, Task, UsageLedger, User, UserAPIKey, UserEntitlement, WorkspaceVersion, utcnow
 from .workspace import RESULT_FIELDS, save_result
 from .provider_config import provider_config, public_provider_config, update_provider_config
+from .services import youtube_access
 from .services.media import AUDIO_SUFFIXES, VIDEO_SUFFIXES, _direct_media_suffix, delete_source, ensure_cover_image, ensure_remote_cover_image, extract_video_url, is_direct_media_url, is_direct_video_url, media_kind, source_platform_label
 from .worker import enqueue
 
@@ -728,6 +729,29 @@ async def upload_douyin_cookies(
         "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
         "user_agent_configured": settings.douyin_user_agent_file.is_file(),
     }
+
+
+@app.get("/api/settings/youtube-cookies")
+def get_youtube_cookie_status(user: User = Depends(admin_only)):
+    return youtube_access.access_status()
+
+
+@app.post("/api/settings/youtube-cookies")
+async def upload_youtube_cookies(cookies: UploadFile = File(...), user_agent: str = Form(""), user: User = Depends(admin_only)):
+    raw = await cookies.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise HTTPException(413, "Cookie 文件不能超过 1MB")
+    try:
+        youtube_access.save_cookies(raw, user_agent)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return youtube_access.access_status()
+
+
+@app.delete("/api/settings/youtube-cookies")
+def delete_youtube_cookies(user: User = Depends(admin_only)):
+    youtube_access.delete_cookies()
+    return youtube_access.access_status()
 
 
 @app.get("/api/tasks")

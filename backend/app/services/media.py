@@ -23,7 +23,6 @@ ALLOWED_HOST_SUFFIXES = (
     "youtu.be", "xiaohongshu.com", "xhslink.com", "weibo.com", "weibo.cn",
     "tiktok.com", "instagram.com", "twitter.com", "x.com",
     "kuaishou.com", "kuaishou.cn", "gifshow.com",
-    "vimeo.com", "dailymotion.com", "dai.ly", "reddit.com", "redd.it", "twitch.tv",
 )
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -103,10 +102,6 @@ def source_platform_label(url: str | None) -> str:
         (("weibo.com", "weibo.cn"), "微博"),
         (("instagram.com",), "Instagram"),
         (("twitter.com", "x.com"), "X / Twitter"),
-        (("vimeo.com",), "Vimeo"),
-        (("dailymotion.com", "dai.ly"), "Dailymotion"),
-        (("reddit.com", "redd.it"), "Reddit"),
-        (("twitch.tv",), "Twitch"),
         (("oceanengine.com",), "抖音"),
         (("qq.com", "qpic.cn", "qlogo.cn", "weixin.qq.com", "wechat.com"), "腾讯/微信"),
     )
@@ -118,13 +113,32 @@ def source_platform_label(url: str | None) -> str:
     return "视频链接"
 
 
-def _cookie_file_for_url(url: str) -> str | None:
-    """Return the persisted Douyin cookie file only for Douyin requests."""
+def _cookie_file_for_url(url: str, *, use_youtube_cookies: bool = False) -> str | None:
+    """Return a platform session; YouTube requires an explicit administrator opt-in."""
     host = (urlparse(url).hostname or "").lower().rstrip(".")
     is_douyin = host == "douyin.com" or host.endswith(".douyin.com") or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")
     if is_douyin and settings.douyin_cookie_file.is_file() and settings.douyin_cookie_file.stat().st_size > 0:
         return str(settings.douyin_cookie_file)
+    is_youtube = host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be" or host.endswith(".youtu.be")
+    if is_youtube and use_youtube_cookies and settings.youtube_cookie_file.is_file() and settings.youtube_cookie_file.stat().st_size > 0:
+        return str(settings.youtube_cookie_file)
     return None
+
+
+def _browser_user_agent_for_url(url: str) -> str | None:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    path = settings.douyin_user_agent_file
+    if host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be" or host.endswith(".youtu.be"):
+        path = settings.youtube_user_agent_file
+    elif not (host == "douyin.com" or host.endswith(".douyin.com") or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")):
+        return None
+    if not path.is_file():
+        return None
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value if len(value) <= 512 and not any(ord(c) < 32 or ord(c) == 127 for c in value) and all(marker in value for marker in ("Mozilla/5.0", "AppleWebKit/", "Chrome/", "Safari/")) else None
 
 
 def _douyin_browser_user_agent(url: str) -> str | None:
@@ -609,7 +623,7 @@ def refresh_douyin_playback(url: str, task_dir: Path) -> tuple[str, str | None]:
     return playback_url, playback_audio_url
 
 
-def _yt_dlp_options(url: str, *, use_douyin_cookies: bool = True, **overrides) -> dict:
+def _yt_dlp_options(url: str, *, use_douyin_cookies: bool = True, use_youtube_cookies: bool = False, **overrides) -> dict:
     options = {
         "noplaylist": True,
         "js_runtimes": {"node": {}},
@@ -625,12 +639,33 @@ def _yt_dlp_options(url: str, *, use_douyin_cookies: bool = True, **overrides) -
             "Accept": "*/*",
         },
     }
-    cookie_file = _cookie_file_for_url(url) if use_douyin_cookies else None
+    cookie_file = _cookie_file_for_url(url, use_youtube_cookies=use_youtube_cookies) if use_douyin_cookies or _is_youtube_url(url) else None
     if cookie_file:
         options["cookiefile"] = cookie_file
-        options["http_headers"]["User-Agent"] = _douyin_browser_user_agent(url) or options["http_headers"]["User-Agent"]
+        options["http_headers"]["User-Agent"] = _browser_user_agent_for_url(url) or options["http_headers"]["User-Agent"]
+    if _is_youtube_url(url) and settings.youtube_pot_provider_url:
+        options["extractor_args"] = {
+            "youtubepot-bgutilhttp": {"base_url": [settings.youtube_pot_provider_url]},
+            "youtube": {"player_client": ["mweb", "tv", "web_safari"]},
+        }
     options.update(overrides)
     return options
+
+
+def _is_youtube_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be" or host.endswith(".youtu.be")
+
+
+def _youtube_access_error(detail: str) -> str:
+    value = detail.lower()
+    if any(marker in value for marker in ("not a bot", "login_required", "sign in", "cookies are no longer valid")):
+        return "YouTube 要求登录验证；请管理员在管理后台的系统设置中更新 YouTube Cookie 后重试。登录态仅用于管理员自己的任务，普通用户可上传本地视频。"
+    if "429" in value or "too many requests" in value:
+        return "YouTube 暂时限制了服务器的访问频率，请稍后重试或上传本地视频。"
+    if "403" in value:
+        return "YouTube 拒绝了媒体访问；请管理员检查 YouTube 访问组件和 Cookie，或上传本地视频。"
+    return "暂时无法获取这个 YouTube 视频，请确认它可以公开播放，稍后重试或上传本地视频。"
 
 
 def is_direct_media_url(url: str) -> bool:
@@ -773,7 +808,7 @@ def _select_playback_urls(info: dict | None) -> tuple[str | None, str | None]:
     return None, None
 
 
-def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | None, str | None]:
+def download_video(url: str, task_dir: Path, *, use_youtube_cookies: bool = False) -> tuple[Path, str, bool, str | None, str | None]:
     normalized_url = validate_public_url(url)
     if is_kuaishou_url(normalized_url):
         media_path, title = download_kuaishou_video(
@@ -827,7 +862,7 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | Non
     playback_audio_url = None
     diagnostic_logger = _YtDlpDiagnosticLogger()
     try:
-        with yt_dlp.YoutubeDL(_yt_dlp_options(normalized_url, logger=diagnostic_logger)) as ydl:
+        with yt_dlp.YoutubeDL(_yt_dlp_options(normalized_url, use_youtube_cookies=use_youtube_cookies, logger=diagnostic_logger)) as ydl:
             info = ydl.extract_info(normalized_url, download=False)
             duration = float(info.get("duration") or 0)
             playback_url, playback_audio_url = _select_playback_urls(info)
@@ -837,7 +872,7 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | Non
         # lookup is only a hint used to avoid downloading a huge video.
         pass
     output = str(task_dir / "source.%(ext)s")
-    opts = _yt_dlp_options(normalized_url, **{
+    opts = _yt_dlp_options(normalized_url, use_youtube_cookies=use_youtube_cookies, **{
         "outtmpl": output,
         "format": "bestaudio/best" if audio_only else "bv*+ba/b",
         "max_filesize": settings.max_upload_mb * 1024 * 1024,
@@ -851,6 +886,8 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | Non
             info = ydl.extract_info(normalized_url, download=True)
     except Exception as exc:
         detail = "\n".join([str(exc), *diagnostic_logger.messages])
+        if _is_youtube_url(normalized_url):
+            raise RuntimeError(_youtube_access_error(detail)) from None
         needs_browser_fallback = "HTTP Error 403" in detail or "403 Forbidden" in detail or "Fresh cookies" in detail
         if is_douyin and needs_browser_fallback:
             try:
@@ -906,7 +943,7 @@ def download_video(url: str, task_dir: Path) -> tuple[Path, str, bool, str | Non
     return media_path, title, audio_only, playback_url, playback_audio_url
 
 
-def download_original_video(url: str, task_dir: Path, progress_callback=None, *, use_douyin_cookies: bool = False) -> tuple[Path, str]:
+def download_original_video(url: str, task_dir: Path, progress_callback=None, *, use_douyin_cookies: bool = False, use_youtube_cookies: bool = False) -> tuple[Path, str]:
     """Download a user-requested video artifact (never switch to audio-only)."""
     normalized_url = validate_public_url(url)
     if is_kuaishou_url(normalized_url):
@@ -935,7 +972,7 @@ def download_original_video(url: str, task_dir: Path, progress_callback=None, *,
         if total:
             progress_callback(min(94, max(5, int(5 + downloaded / total * 89))))
 
-    options = _yt_dlp_options(normalized_url, use_douyin_cookies=use_douyin_cookies, **{
+    options = _yt_dlp_options(normalized_url, use_douyin_cookies=use_douyin_cookies, use_youtube_cookies=use_youtube_cookies, **{
         "outtmpl": str(task_dir / "source.%(ext)s"),
         "format": "bv*+ba/b",
         "max_filesize": settings.max_upload_mb * 1024 * 1024,
@@ -950,6 +987,8 @@ def download_original_video(url: str, task_dir: Path, progress_callback=None, *,
             info = ydl.extract_info(normalized_url, download=True)
     except Exception as exc:
         detail = "\n".join([str(exc), *diagnostic_logger.messages])
+        if _is_youtube_url(normalized_url):
+            raise RuntimeError(_youtube_access_error(detail)) from None
         host = (urlparse(normalized_url).hostname or "").lower().rstrip(".")
         is_douyin = host == "douyin.com" or host.endswith(".douyin.com") or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")
         needs_browser_fallback = "HTTP Error 403" in detail or "403 Forbidden" in detail or "Fresh cookies" in detail
