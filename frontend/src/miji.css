@@ -2,6 +2,10 @@
 :root {
   --paper: #faf3e6;
   --surface: #fff;
+  --canvas: #f4f2ee;
+  --hero-stage: #eee2d5;
+  --hero-muted: #706a64;
+  --hero-border: #e5d8ca;
   --ink: #272421;
   --muted: #78736e;
   --line: #ebe5dd;
@@ -10,7 +14,7 @@
   --coral-soft: #f7e3d4;
   --sidebar-surface: #f4eadc;
   --brand-button: #ad4f2c;
-  --sidebar-width: 224px;
+  --sidebar-width: 184px;
   color: var(--ink);
   background: var(--paper);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -18,6 +22,10 @@
 :root[data-theme="dark"] {
   --paper: #211d19;
   --surface: #2b2622;
+  --canvas: #201d1a;
+  --hero-stage: #342a24;
+  --hero-muted: #d0bca9;
+  --hero-border: #514136;
   --ink: #f3ece3;
   --muted: #bdb1a4;
   --line: #453b32;
@@ -33,7 +41,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px soli
 input, textarea, select { accent-color: var(--brand-button); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .miji-app { min-height: 100dvh; padding-left: var(--sidebar-width); background: #fff; color: var(--ink); transition: padding-left .2s ease; }
-.miji-app.sidebar-is-collapsed { --sidebar-width: 72px; }
+.miji-app.sidebar-is-collapsed { --sidebar-width: 64px; }
 :root[data-theme="dark"] .miji-app { background: #181818; }
 .miji-app > .shell { width: min(1280px, calc(100% - 72px)); }
 .miji-app .primary, .miji-help .primary, .login-panel .primary { background: var(--brand-button); color: #fff; border: 1px solid transparent; border-radius: 999px; box-shadow: none; }
@@ -43,24 +51,28 @@ input, textarea, select { accent-color: var(--brand-button); }
 .miji-app .outline:hover:not(:disabled) { color: var(--coral); border-color: var(--coral); background: var(--soft); }
 .miji-app .miji-sidebar {
   position: fixed; inset: 0 auto 0 0; width: var(--sidebar-width); height: 100dvh;
-  padding: 30px 14px 18px; z-index: 35; display: flex; flex-direction: column;
+  padding: 24px 12px 16px; z-index: 35; display: flex; flex-direction: column;
   gap: 0; background: var(--sidebar-surface); border: 0; border-right: 1px solid var(--line); transition: width .2s ease, padding .2s ease;
 }
-.sidebar-brand { min-height: 127px; display: flex; align-items: flex-start; }
+.sidebar-brand { min-height: 96px; display: flex; align-items: flex-start; justify-content: center; }
 .brand-home { display: block; padding: 0; max-width: 100%; }
 .brand-lockup { display: block; width: 219px; height: 92px; overflow: hidden; }
 .brand-lockup img { display: block; width: 280px; height: auto; max-width: none; margin: -5px 0 0 -38px; }
 .brand-lockup .brand-mark { display: none; width: 48px; height: 48px; margin: 0; object-fit: contain; }
+.miji-sidebar .brand-home { display: flex; justify-content: center; width: 100%; }
+.miji-sidebar .brand-lockup { position: relative; width: 148px; height: 72px; flex-shrink: 0; }
+/* Center the visible artwork, accounting for the source image's transparent margins. */
+.miji-sidebar .brand-lockup .brand-wordmark { position: absolute; width: 212px; height: auto; margin: 0; left: 50%; top: 50%; transform: translate(-50.8%, -50%); }
 .miji-sidebar nav { display: flex; flex-direction: column; gap: 10px; width: 100%; }
-.miji-sidebar nav button { display: flex; align-items: center; gap: 18px; min-height: 56px; padding: 12px 20px; border-radius: 12px; font-size: 17px; text-align: left; color: var(--ink); }
+.miji-sidebar nav button { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 10px 12px; border-radius: 10px; font-size: 14px; text-align: left; color: var(--ink); }
 .miji-sidebar nav button:hover { background: var(--soft); }
 .miji-sidebar nav button.active { color: var(--coral); background: var(--coral-soft); }
 .miji-sidebar nav button.active::after { display: none; }
 .miji-sidebar nav button svg { flex-shrink: 0; }
 .sidebar-bottom { margin-top: auto; padding-top: 36px; }
-.sidebar-help { min-height: 48px; display: flex; align-items: center; gap: 16px; padding: 8px 20px; color: var(--ink); font-size: 15px; width: 100%; text-align: left; }
+.sidebar-help { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; color: var(--ink); font-size: 13px; width: 100%; text-align: left; }
 .sidebar-help:hover { color: var(--coral); }
-.miji-sidebar .account { display: grid; grid-template-columns: 40px 1fr; gap: 5px; margin: 6px 10px 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--ink); }
+.miji-sidebar .account { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 4px; margin: 6px 4px 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--ink); }
 .miji-sidebar .account-menu { grid-column: 1 / -1; }
 .miji-sidebar .account-trigger { width: 100%; padding: 8px 4px; height: 56px; border: 0; background: transparent; border-radius: 8px; display: flex; gap: 12px; }
 .miji-sidebar .account-avatar { width: 36px; height: 36px; background: var(--coral-soft); color: var(--coral); }
@@ -76,11 +88,11 @@ input, textarea, select { accent-color: var(--brand-button); }
 .miji-sidebar .account-popover button:hover, .miji-sidebar .language-popover button:hover, .miji-sidebar .theme-popover button:hover, .miji-sidebar .theme-popover button.selected { background: var(--coral-soft); color: var(--coral); }
 .miji-sidebar .account-usage { background: var(--soft); border-color: var(--line); }
 .mobile-menu-toggle, .mobile-menu-close, .sidebar-scrim { display: none; }
-.miji-sidebar.is-collapsed { padding-inline: 10px; }
+.miji-sidebar.is-collapsed { padding-inline: 8px; }
 .miji-sidebar.is-collapsed .sidebar-brand { justify-content: center; }
-.miji-sidebar.is-collapsed .brand-lockup { width: 56px; }
+.miji-sidebar.is-collapsed .brand-lockup { width: 40px; height: 48px; }
 .miji-sidebar.is-collapsed .brand-lockup .brand-wordmark { display: none; }
-.miji-sidebar.is-collapsed .brand-lockup .brand-mark { display: block; }
+.miji-sidebar.is-collapsed .brand-lockup .brand-mark { display: block; width: 36px; height: 36px; margin: 6px auto; }
 .miji-sidebar.is-collapsed nav button { justify-content: center; gap: 0; padding-inline: 0; }
 .miji-sidebar.is-collapsed nav button span,
 .miji-sidebar.is-collapsed .sidebar-help span,
@@ -102,12 +114,15 @@ input, textarea, select { accent-color: var(--brand-button); }
 .workspace-topbar > b { font-size: 22px; font-weight: 650; }
 .workspace-topbar > button { display: flex; align-items: center; gap: 10px; font-size: 15px; padding: 7px 0 7px 12px; }
 .workspace-content { max-width: 1360px; margin: 0 auto; padding: 0 44px 20px; }
-.workspace-hero { height: 258px; display: flex; align-items: center; position: relative; isolation: isolate; }
-.workspace-hero > div { position: relative; z-index: 1; padding: 0 0 10px 20px; }
-.workspace-hero h1 { font-size: clamp(42px, 4.65vw, 72px); line-height: 1.22; font-weight: 780; letter-spacing: -.045em; margin: 0; color: var(--ink); }
-.workspace-hero p { font-size: 17px; line-height: 1.6; margin: 14px 0 0; color: var(--muted); }
-.workspace-mascot { position: absolute; right: -10px; bottom: -31px; width: 520px; height: 366px; object-fit: contain; z-index: 0; pointer-events: none; }
-.workspace-create { background: var(--surface); border-radius: 16px; padding: 0 22px 16px; }
+:is(.page-home, .page-download) { background: var(--canvas); }
+:root[data-theme="dark"] .miji-app:is(.page-home, .page-download) { background: var(--canvas); }
+:is(.page-home, .page-download) .workspace-topbar { background: var(--canvas); }
+:is(.page-home, .page-download) .workspace-hero { height: 278px; display: flex; align-items: center; position: relative; isolation: isolate; overflow: hidden; padding: 0 34px; margin-bottom: 22px; border: 1px solid var(--hero-border); border-radius: 18px; background: var(--hero-stage); }
+:is(.page-home, .page-download) .workspace-hero > div { position: relative; z-index: 1; max-width: 54%; padding: 0 0 10px 4px; }
+:is(.page-home, .page-download) .workspace-hero h1 { font-size: clamp(40px, 4.1vw, 60px); line-height: 1.18; font-weight: 780; letter-spacing: -.045em; margin: 0; color: var(--ink); }
+:is(.page-home, .page-download) .workspace-hero p { max-width: 470px; font-size: 16px; line-height: 1.65; margin: 14px 0 0; color: var(--hero-muted); }
+:is(.page-home, .page-download) .workspace-mascot { position: absolute; right: 8px; bottom: -72px; width: 500px; height: 350px; object-fit: contain; z-index: 0; pointer-events: none; }
+:is(.page-home, .page-download) .workspace-create { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 0 22px 16px; }
 .workspace-tabs { height: 64px; display: flex; gap: 12px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
 .workspace-tabs > button { padding: 0 28px; font-size: 20px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 550; }
 .workspace-tabs > button[aria-selected="true"] { color: var(--coral); border-color: var(--coral); }
@@ -144,7 +159,6 @@ input, textarea, select { accent-color: var(--brand-button); }
 .miji-app .workspace-unified .workspace-submit { position: static; white-space: nowrap; }
 .unified-remove-file { width: 28px; height: 28px; display: grid; place-items: center; flex-shrink: 0; color: var(--muted); border-radius: 50%; }
 .unified-remove-file:hover { background: var(--coral-soft); color: var(--coral); }
-.workspace-input-options { padding: 3px 2px 0; }
 @media (max-width: 1100px) {
   .workspace-input.workspace-unified { flex-wrap: wrap; }
   .workspace-unified-field { flex-basis: 100%; }
@@ -160,7 +174,8 @@ input, textarea, select { accent-color: var(--brand-button); }
 .workspace-section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .workspace-section-title h2 { font-size: 21px; font-weight: 650; margin: 0; }
 .workspace-section-title > button { display: flex; align-items: center; gap: 9px; font-size: 14px; color: var(--muted); }
-.recent-table { background: var(--surface); border-radius: 14px; overflow: hidden; padding-inline: 20px; }
+:is(.page-home, .page-download) .workspace-submit, :is(.page-home, .page-download) .unified-upload { border-radius: 9px; }
+:is(.page-home, .page-download) .recent-table { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; padding-inline: 20px; }
 .recent-table-head, .recent-table-row { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(120px, .9fr) minmax(140px, .65fr); align-items: center; text-align: left; gap: 16px; }
 .recent-table-head { height: 42px; color: var(--muted); font-size: 13px; border-bottom: 1px solid var(--line); padding: 0 6px; }
 .recent-table-row { width: 100%; min-height: 55px; padding: 10px 6px; border-bottom: 1px solid var(--line); font-size: 16px; color: var(--ink); }
@@ -180,10 +195,7 @@ input, textarea, select { accent-color: var(--brand-button); }
 .workspace-retention { display: flex; align-items: center; gap: 9px; margin: 14px 4px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 
 /* Three-column editing workspace. */
-.page-detail { --sidebar-width: 224px; background: var(--surface); }
-.sidebar-is-collapsed.page-detail { --sidebar-width: 72px; }
-.page-detail .brand-lockup { width: 178px; }
-.page-detail .brand-lockup img { width: 245px; margin-left: -34px; }
+.page-detail { background: var(--surface); }
 .miji-app .miji-detail { width: 100%; margin: 0; padding: 0; background: var(--surface); }
 .miji-detail .detail-head { min-height: 98px; margin: 0; padding: 20px 26px; gap: 20px; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
 .miji-detail .detail-back-button { width: auto; padding: 0 16px 0 0; height: 28px; border: 0; border-radius: 0; border-right: 1px solid var(--line); display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 16px; flex-shrink: 0; }
@@ -322,21 +334,18 @@ input, textarea, select { accent-color: var(--brand-button); }
 
 @media (min-width: 1700px) {
   .workspace-content { max-width: 1360px; }
-  .workspace-hero { height: 278px; }
-  .workspace-mascot { width: 490px; height: 350px; }
-  .workspace-hero h1 { font-size: 70px; }
+  :is(.page-home, .page-download) .workspace-hero { height: 278px; }
+  :is(.page-home, .page-download) .workspace-mascot { width: 490px; height: 350px; }
+  :is(.page-home, .page-download) .workspace-hero h1 { font-size: 64px; }
 }
 @media (max-width: 1250px) {
-  :root { --sidebar-width: 210px; }
-  .miji-app.sidebar-is-collapsed { --sidebar-width: 72px; }
   .brand-lockup { width: 180px; }
   .brand-lockup img { width: 246px; margin-left: -34px; }
-  .miji-sidebar nav button { padding-inline: 14px; gap: 12px; font-size: 15px; }
   .workspace-content { padding-inline: 32px; }
   .workspace-topbar { padding-inline: 32px; }
-  .workspace-mascot { width: 350px; height: 278px; right: -25px; }
-  .workspace-hero { height: 264px; }
-  .workspace-hero p { font-size: 15px; max-width: 470px; }
+  :is(.page-home, .page-download) .workspace-mascot { width: 350px; height: 278px; right: -25px; }
+  :is(.page-home, .page-download) .workspace-hero { height: 264px; padding-inline: 28px; }
+  :is(.page-home, .page-download) .workspace-hero p { font-size: 15px; max-width: 470px; }
   .workspace-drop-target { padding-inline: 130px; }
   .miji-detail .detail-result-grid { grid-template-columns: minmax(215px, .8fr) minmax(300px, 1.25fr); }
   .miji-tools-rail { position: static; max-height: none; grid-column: 1 / -1; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 24px; }
@@ -347,9 +356,9 @@ input, textarea, select { accent-color: var(--brand-button); }
   .editor-task-status { display: none; }
 }
 @media (max-width: 980px) {
-  .workspace-hero h1 { font-size: 46px; }
-  .workspace-mascot { width: 270px; height: 245px; right: -24px; }
-  .workspace-hero p { max-width: 350px; font-size: 14px; }
+  :is(.page-home, .page-download) .workspace-hero h1 { font-size: 46px; }
+  :is(.page-home, .page-download) .workspace-mascot { width: 270px; height: 245px; right: -24px; }
+  :is(.page-home, .page-download) .workspace-hero p { max-width: 350px; font-size: 14px; }
   .workspace-drop-target { padding: 12px 20px 74px; }
   .workspace-input, .workspace-drop-target { min-height: 258px; }
   .recent-table-head, .recent-table-row { grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; }
@@ -362,25 +371,20 @@ input, textarea, select { accent-color: var(--brand-button); }
 @media (max-width: 760px) {
   :root { --sidebar-width: 0px; }
   .miji-app, .page-detail { padding-left: 0; --sidebar-width: 0px; }
-  .miji-app .miji-sidebar { width: 248px; transform: translateX(-100%); transition: transform .2s ease; border-right: 1px solid var(--line); }
+  .miji-app .miji-sidebar { width: 216px; transform: translateX(-100%); transition: transform .2s ease; border-right: 1px solid var(--line); }
   .miji-app .miji-sidebar.is-open { transform: translateX(0); }
-  .miji-sidebar .brand-lockup { width: 205px; }
-  .miji-sidebar .brand-lockup img { width: 280px; margin-left: -38px; }
-  .miji-sidebar .brand-lockup .brand-mark { width: 48px; height: 48px; margin: 0; }
-  .sidebar-brand { min-height: 118px; align-items: flex-start; }
   .mobile-menu-toggle { position: absolute; top: 21px; left: 18px; width: 34px; height: 34px; display: grid; place-items: center; color: var(--ink); z-index: 25; }
   .mobile-menu-close { display: grid; place-items: center; position: absolute; top: 5px; right: 5px; width: 30px; height: 30px; color: var(--muted); }
   .sidebar-scrim { display: block; position: fixed; inset: 0; width: 100%; height: 100dvh; background: #27242166; z-index: 34; }
-  .miji-sidebar nav button { font-size: 17px; padding-inline: 20px; gap: 18px; }
   .miji-sidebar .account-popover { width: min(310px, calc(100vw - 32px)); }
   .workspace-topbar { height: 76px; padding: 22px 22px 22px 64px; }
   .workspace-topbar > b { font-size: 18px; }
   .workspace-content { padding-inline: 22px; }
-  .workspace-hero { height: 250px; overflow: hidden; }
-  .workspace-hero > div { padding-left: 0; }
-  .workspace-hero h1 { font-size: clamp(40px, 7vw, 54px); }
-  .workspace-hero p { max-width: 60%; font-size: 13px; }
-  .workspace-mascot { width: 270px; height: 240px; right: -34px; bottom: -25px; }
+  :is(.page-home, .page-download) .workspace-hero { height: 250px; overflow: hidden; padding-inline: 20px; }
+  :is(.page-home, .page-download) .workspace-hero > div { max-width: 60%; padding-left: 0; }
+  :is(.page-home, .page-download) .workspace-hero h1 { font-size: clamp(40px, 7vw, 54px); }
+  :is(.page-home, .page-download) .workspace-hero p { max-width: 100%; font-size: 13px; }
+  :is(.page-home, .page-download) .workspace-mascot { width: 270px; height: 240px; right: -34px; bottom: -25px; }
   .workspace-create { padding-inline: 15px; border-radius: 14px; }
   .workspace-tabs { height: 58px; gap: 4px; }
   .workspace-tabs > button { font-size: 16px; padding-inline: 22px; }
@@ -434,11 +438,11 @@ input, textarea, select { accent-color: var(--brand-button); }
 }
 @media (max-width: 420px) {
   .workspace-content { padding-inline: 16px; }
-  .workspace-hero { height: 236px; }
-  .workspace-hero h1 { font-size: 40px; }
-  .workspace-mascot { width: 205px; height: 205px; right: -35px; bottom: -25px; }
-  .workspace-hero > div { padding: 0 0 12px; }
-  .workspace-hero p { max-width: 62%; font-size: 12px; line-height: 1.7; }
+  :is(.page-home, .page-download) .workspace-hero { height: 236px; padding-inline: 18px; }
+  :is(.page-home, .page-download) .workspace-hero h1 { font-size: 40px; }
+  :is(.page-home, .page-download) .workspace-mascot { width: 205px; height: 205px; right: -35px; bottom: -25px; }
+  :is(.page-home, .page-download) .workspace-hero > div { max-width: 62%; padding: 0 0 12px; }
+  :is(.page-home, .page-download) .workspace-hero p { max-width: 100%; font-size: 12px; line-height: 1.7; }
   .workspace-drop-target strong { font-size: 15px; }
   .workspace-submit { min-width: 146px; }
   .recent-table-head, .recent-table-row { grid-template-columns: minmax(0, 1fr) 105px; gap: 8px; }
