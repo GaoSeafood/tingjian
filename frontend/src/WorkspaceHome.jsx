@@ -72,7 +72,21 @@ export default function WorkspaceHome({ tasks, refresh, onOpen, onHistory, rende
             <span className="unified-source-icon">{file ? (file.type.startsWith('audio/') ? <AudioLines size={24}/> : <Video size={24}/>) : <Link2 size={24}/>}</span>
             <textarea id="media-link" value={file ? file.name : input} readOnly={!!file} disabled={busy} onChange={event => { setInput(event.target.value); setFile(null); setError('') }} rows={!file && (multipleLinks || input.includes('\n')) ? Math.min(6, Math.max(3, input.split('\n').length)) : 1}
               onPaste={event => { if (file && !busy) { const text = event.clipboardData.getData('text'); if (text.trim()) { event.preventDefault(); setFile(null); setInput(text); setError('') } } }}
-              onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); if (!busy && (file || input.trim())) event.currentTarget.form.requestSubmit() } }}
+              onKeyDown={event => {
+                if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return
+                if (download) {
+                  if (event.ctrlKey || event.metaKey) { event.preventDefault(); if (!busy && input.trim()) event.currentTarget.form.requestSubmit() }
+                  return
+                }
+                event.preventDefault()
+                if (event.ctrlKey || event.metaKey) {
+                  if (file) return
+                  const field = event.currentTarget
+                  const start = field.selectionStart, end = field.selectionEnd
+                  setInput(input.slice(0, start) + '\n' + input.slice(end))
+                  requestAnimationFrame(() => { field.selectionStart = field.selectionEnd = start + 1 })
+                } else if (!busy && (file || input.trim())) event.currentTarget.form.requestSubmit()
+              }}
               placeholder={download ? (en ? 'Paste a video link or sharing text…' : '粘贴视频链接或整段分享文案…') : (en ? 'Paste video links or sharing text, one or more links…' : '粘贴视频链接或分享文案，支持多个链接…')}/>
             {file && <button type="button" className="unified-remove-file" disabled={busy} aria-label={en ? 'Remove selected file' : '移除已选文件'} onClick={() => { setFile(null); setError('') }}><X size={18}/></button>}
           </div>
@@ -82,6 +96,7 @@ export default function WorkspaceHome({ tasks, refresh, onOpen, onHistory, rende
           </div>
           <input ref={fileRef} type="file" accept="audio/*,video/*,.mkv,.webm,.m4a,.flac,.ogg" hidden disabled={busy || download} aria-label={en ? 'Choose audio or video' : '选择音视频文件'} onChange={event => { choose(event.target.files[0]); event.target.value = '' }}/>
         </div>
+        {!download && <p className="workspace-form-note">{en ? 'Press Enter to transcribe · Command/Ctrl + Enter for a new line' : '按回车直接听写 · 按 Command/Windows（或 Ctrl）+ 回车换行'}</p>}
         {!download && file && <p className="workspace-form-note">{sizeLabel(file.size)} · {en ? 'File selected. Start transcription when ready.' : '文件已选好，点击开始听写后上传。'}</p>}
         {download && <p className="workspace-form-note">{en ? 'Downloads only. Transcription does not start automatically.' : '只下载原视频，不会自动听写。原文件按保留策略自动清理。'}</p>}
         {error && <div className="error-line" role="alert">{error}</div>}
