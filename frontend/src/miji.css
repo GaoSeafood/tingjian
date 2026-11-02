@@ -216,8 +216,13 @@ input, textarea, select { accent-color: var(--brand-button); }
 .transcript-provenance .compact { height: 28px; font-size: 11px; }
 .miji-detail .detail-result-grid { display: grid; grid-template-columns: minmax(240px, .95fr) minmax(330px, 1.3fr) minmax(245px, .86fr); gap: 0; align-items: start; }
 .miji-detail .media-column-card, .miji-detail .transcript-column-card { border: 0; border-radius: 0; box-shadow: none; padding: 27px; background: var(--surface); min-width: 0; }
-.miji-detail .media-column-card { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 0; max-height: 100dvh; overflow: auto; }
+.miji-detail .media-column-card { display: flex; flex-direction: column; gap: 16px; }
 .miji-detail .media-column-card > * { flex-shrink: 0; }
+@media (min-width: 1251px) and (min-height: 800px) {
+  .miji-detail .media-column-card { align-self: stretch; }
+  .miji-detail .media-column-card.is-video .source-preview,
+  .miji-detail .media-column-card.is-audio .asset-section { position: sticky; top: 12px; z-index: 2; background: var(--surface); }
+}
 .miji-detail .transcript-column-card { min-height: calc(100dvh - 137px); border-left: 1px solid var(--line); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
 .miji-detail .media-section-heading h2 { font-size: 20px; margin: 0; color: var(--ink); }
 .miji-detail .media-section-heading h3 { color: var(--ink); }
@@ -269,7 +274,7 @@ input, textarea, select { accent-color: var(--brand-button); }
 .document-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 18px; margin-top: 10px; font-size: 12px; color: var(--muted); }
 .document-footer > span { display: flex; align-items: center; gap: 9px; }
 .document-footer .compact { height: 34px; font-size: 12px; }
-.miji-tools-rail { min-width: 0; padding: 27px; position: sticky; top: 0; max-height: 100dvh; overflow: auto; }
+.miji-tools-rail { min-width: 0; padding: 27px; }
 .miji-tools-rail > h2 { font-size: 22px; margin: 0; }
 .miji-tools-rail > p { font-size: 13px; color: var(--muted); line-height: 1.7; margin: 9px 0 20px; }
 .miji-tool { padding: 24px 0; border-top: 1px solid var(--line); }
@@ -289,6 +294,10 @@ input, textarea, select { accent-color: var(--brand-button); }
 .miji-tools-rail .rewrite-form { grid-template-columns: 1fr; padding: 12px; margin: 16px 0 0; border: 1px solid var(--line); background: var(--soft); }
 .miji-tools-rail .rewrite-form textarea, .miji-tools-rail .rewrite-form select { width: 100%; color: var(--ink); background: var(--surface); font-size: 13px; border-color: var(--line); }
 .workspace-results { padding: 28px; background: var(--surface); border-top: 1px solid var(--line); }
+.workspace-results .rewrite-output { max-height: none; overflow: visible; }
+.workspace-results .rewrite-output textarea { height: auto; resize: none; overflow: hidden; }
+.workspace-results .version-preview pre { max-height: none; overflow: visible; }
+.return-to-transcript { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px; }
 .workspace-results .next-results { max-width: 1050px; margin: 0 auto; }
 .workspace-results .result-empty { font-size: 13px; color: var(--muted); background: var(--soft); border-color: var(--line); }
 .workspace-results .video-questions { margin-top: 25px; padding-top: 24px; border-top: 1px solid var(--line); }

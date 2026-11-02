@@ -9,7 +9,7 @@ import {
 import { api } from './api'
 import WorkspaceHistory from './WorkspaceHistory'
 import WorkspaceHome from './WorkspaceHome'
-import TranscriptDocument from './TranscriptDocument'
+import TranscriptDocument, { AutoResizeTextarea } from './TranscriptDocument'
 import AudioPlayer from './AudioPlayer'
 import { BrandLogo, HelpDialog, ToolChoice } from './brand'
 
@@ -365,7 +365,7 @@ function SourceMedia({ task, displayProgress, mediaRef, mediaSrc, mediaMode, med
     audio.play().catch(() => {})
   }
   const stopPlaybackAudio = () => playbackAudioRef.current?.pause()
-  return <section className="media-column-card">
+  return <section className={`media-column-card ${isVideo ? 'is-video' : 'is-audio'}`}>
       <div className="media-section-heading"><h2>{isVideo ? '原始视频' : '原始音频'}</h2>{isVideo && <span>{clock(task.duration)}</span>}</div>
       {isVideo && <div className={`source-preview ${videoRatio < 1 ? 'portrait' : ''}`}>
         {task.source_available && mediaMode !== 'failed'
@@ -425,6 +425,8 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
   const [mediaRetryCount, setMediaRetryCount] = useState(0)
   const [mediaRefreshAttempted, setMediaRefreshAttempted] = useState(false)
   const mediaRef = useRef(null)
+  const resultReturnPosition = useRef(null)
+  const [canReturnToTranscript, setCanReturnToTranscript] = useState(false)
   const playbackFallbackInProgress = useRef(false)
   const taskIdRef = useRef(taskId)
   const dirtyRef = useRef(dirty)
@@ -493,7 +495,11 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
     if (dirtyRef.current) await save()
     if (rewriteDirtyRef.current) await saveRewrite()
   }
-  const revealResults = () => requestAnimationFrame(() => document.getElementById('workspace-results')?.scrollIntoView({behavior: 'smooth', block: 'start'}))
+  const revealResults = () => {
+    resultReturnPosition.current = window.scrollY
+    setCanReturnToTranscript(true)
+    requestAnimationFrame(() => document.getElementById('workspace-results')?.scrollIntoView({behavior: 'smooth', block: 'start'}))
+  }
   const showHighlights = () => { revealResults(); setActiveTool('highlights'); setAction(null); setNotice('') }
   const startHighlights = async () => {
     showHighlights(); setAction('highlights')
@@ -669,6 +675,7 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
       </aside>}
     </div>
     {transcriptionComplete && <section className="workspace-results" id="workspace-results"><div className="next-results">
+            {canReturnToTranscript && <button type="button" className="outline compact return-to-transcript" onClick={() => { window.scrollTo({top: resultReturnPosition.current, behavior: 'smooth'}); setCanReturnToTranscript(false) }}><ArrowLeft size={16}/>返回阅读位置</button>}
             {task.stale_results?.includes(activeTool) && <div className="notice">听写稿已更新，下面的结果来自较早版本。可以重新生成。</div>}
             {!running && <div className="result-actions">
               {activeTool === 'summary' && task.summary_text && <button className="outline compact" onClick={startSummary}>重新生成摘要</button>}
@@ -683,7 +690,7 @@ function Detail({ taskId, onBack, refresh, onOpen, onDirtyChange }) {
             {activeTool === 'highlights' && (task.highlights?.length > 0 ? <HighlightResults items={task.highlights} onSeek={seekTo}/> : <div className="result-empty">提取的精彩片段会显示在这里。</div>)}
             {activeTool === 'summary' && (task.summary_text ? <div className="rewrite-result"><div className="result-heading"><Sparkles size={18}/><b>AI 文案摘要</b><button onClick={() => copyResultText(task.summary_text, 'AI 摘要')}><Copy size={16}/>复制</button></div><div className="rewrite-output"><MarkdownPreview value={task.summary_text}/></div></div> : <div className="result-empty">生成的摘要会显示在这里。</div>)}
             {activeTool === 'visual' && (task.visual_analysis?.length > 0 ? <VisualResults items={task.visual_analysis} onSeek={seekTo}/> : <div className="result-empty">视频画面分析结果会显示在这里。</div>)}
-            {activeTool === 'rewrite' && (task.rewrite_text ? <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>新口播稿</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => copyResultText(rewriteDraft, '改写稿')}><Copy size={16}/>复制</button>{rewriteDirty && <button disabled={running || !rewriteDraft.trim()} onClick={() => saveRewrite().catch(err => setNotice(err.message))}><Save size={16}/>{rewriteSaving ? '保存中…' : '保存改写稿'}</button>}</div><div className="rewrite-output">{rewriteView === 'edit' ? <textarea aria-label="编辑改写稿" value={rewriteDraft} disabled={running} onChange={event => { setRewriteDraft(event.target.value); setRewriteDirty(true); rewriteDirtyRef.current = true }} spellCheck="false" /> : <MarkdownPreview value={rewriteDraft}/>}</div>{rewriteDirty && <small className="draft-warning">修改尚未保存，点击“保存改写稿”后刷新仍会保留。</small>}</div> : <div className="result-empty">生成的新口播稿会显示在这里。</div>)}
+            {activeTool === 'rewrite' && (task.rewrite_text ? <div className="rewrite-result"><div className="result-heading"><PencilLine size={18}/><b>新口播稿</b><div className="result-switch"><button className={rewriteView === 'preview' ? 'active' : ''} onClick={() => setRewriteView('preview')}>预览</button><button className={rewriteView === 'edit' ? 'active' : ''} onClick={() => setRewriteView('edit')}>编辑</button></div><button onClick={() => copyResultText(rewriteDraft, '改写稿')}><Copy size={16}/>复制</button>{rewriteDirty && <button disabled={running || !rewriteDraft.trim()} onClick={() => saveRewrite().catch(err => setNotice(err.message))}><Save size={16}/>{rewriteSaving ? '保存中…' : '保存改写稿'}</button>}</div><div className="rewrite-output">{rewriteView === 'edit' ? <AutoResizeTextarea aria-label="编辑改写稿" value={rewriteDraft} disabled={running} onChange={event => { setRewriteDraft(event.target.value); setRewriteDirty(true); rewriteDirtyRef.current = true }} spellCheck="false" /> : <MarkdownPreview value={rewriteDraft}/>}</div>{rewriteDirty && <small className="draft-warning">修改尚未保存，点击“保存改写稿”后刷新仍会保留。</small>}</div> : <div className="result-empty">生成的新口播稿会显示在这里。</div>)}
             {activeTool === 'translate' && (task.translated_text ? <div className="rewrite-result"><div className="result-heading"><Languages size={18}/><b>{task.translation_language || '翻译结果'}</b><button onClick={() => copyResultText(task.translated_text, '翻译稿')}><Copy size={16}/>复制</button></div><div className="rewrite-output"><MarkdownPreview value={task.translated_text}/></div></div> : <div className="result-empty">选择目标语言后开始翻译，译文会显示在这里。</div>)}
             <section className="video-questions"><h3>围绕这条视频提问</h3><p>回答依据当前已保存的听写稿，并附原文时间点。每次问答计入一次总结额度。</p>
               <textarea aria-label="视频问题" value={question} maxLength={1000} onChange={e => setQuestion(e.target.value)} placeholder="例如：这条视频的核心观点是什么？作者举了哪些例子？"/>

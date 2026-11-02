@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 
-function Segment({ segment, index, disabled, onEdit, onSeek }) {
+export function AutoResizeTextarea({ value, ...props }) {
   const ref = useRef(null)
   useLayoutEffect(() => {
     const area = ref.current
@@ -17,10 +17,14 @@ function Segment({ segment, index, disabled, onEdit, onSeek }) {
     })
     observer.observe(area)
     return () => observer.disconnect()
-  }, [segment.text])
+  }, [value])
+  return <textarea ref={ref} value={value} {...props} />
+}
+
+function Segment({ segment, index, disabled, onEdit, onSeek }) {
   return <section className="transcript-paragraph">
     <div className="transcript-paragraph-meta"><button type="button" onClick={() => onSeek(segment.start_seconds ?? segment.start)} aria-label={`播放 ${segment.start || '00:00'}`}><span>[{segment.start || '00:00'}]</span></button>{segment.speaker && <span>{segment.speaker}</span>}</div>
-    <textarea ref={ref} aria-label={`编辑第 ${index + 1} 段听写稿`} value={segment.text} disabled={disabled} onChange={event => onEdit(event.target.value)} rows={2} spellCheck="false" />
+    <AutoResizeTextarea aria-label={`编辑第 ${index + 1} 段听写稿`} value={segment.text} disabled={disabled} onChange={event => onEdit(event.target.value)} rows={2} spellCheck="false" />
   </section>
 }
 

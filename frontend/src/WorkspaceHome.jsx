@@ -74,10 +74,6 @@ export default function WorkspaceHome({ tasks, refresh, onOpen, onHistory, rende
               onPaste={event => { if (file && !busy) { const text = event.clipboardData.getData('text'); if (text.trim()) { event.preventDefault(); setFile(null); setInput(text); setError('') } } }}
               onKeyDown={event => {
                 if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return
-                if (download) {
-                  if (event.ctrlKey || event.metaKey) { event.preventDefault(); if (!busy && input.trim()) event.currentTarget.form.requestSubmit() }
-                  return
-                }
                 event.preventDefault()
                 if (event.ctrlKey || event.metaKey) {
                   if (file) return
@@ -96,7 +92,7 @@ export default function WorkspaceHome({ tasks, refresh, onOpen, onHistory, rende
           </div>
           <input ref={fileRef} type="file" accept="audio/*,video/*,.mkv,.webm,.m4a,.flac,.ogg" hidden disabled={busy || download} aria-label={en ? 'Choose audio or video' : '选择音视频文件'} onChange={event => { choose(event.target.files[0]); event.target.value = '' }}/>
         </div>
-        {!download && <p className="workspace-form-note">{en ? 'Press Enter to transcribe · Command/Ctrl + Enter for a new line' : '按回车直接听写 · 按 Command/Windows（或 Ctrl）+ 回车换行'}</p>}
+        <p className="workspace-form-note">{en ? `Press Enter to ${download ? 'download' : 'transcribe'} · Command/Ctrl + Enter for a new line` : `按回车直接${download ? '下载' : '听写'} · 按 Command/Windows（或 Ctrl）+ 回车换行`}</p>
         {!download && file && <p className="workspace-form-note">{sizeLabel(file.size)} · {en ? 'File selected. Start transcription when ready.' : '文件已选好，点击开始听写后上传。'}</p>}
         {download && <p className="workspace-form-note">{en ? 'Downloads only. Transcription does not start automatically.' : '只下载原视频，不会自动听写。原文件按保留策略自动清理。'}</p>}
         {error && <div className="error-line" role="alert">{error}</div>}
