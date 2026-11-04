@@ -838,21 +838,6 @@ def download_video(url: str, task_dir: Path, *, use_youtube_cookies: bool = Fals
     is_douyin = host == "douyin.com" or host.endswith(".douyin.com") or host == "iesdouyin.com" or host.endswith(".iesdouyin.com")
     cached_video = task_dir / "source.mp4"
 
-    if is_douyin and _cookie_file_for_url(normalized_url) and _douyin_browser_user_agent(normalized_url):
-        try:
-            media_path, title, playback_url, playback_audio_url = _download_douyin_with_browser(
-                normalized_url, task_dir, audio_only=True,
-            )
-            for stale_video in task_dir.glob("source.*"):
-                if stale_video != media_path and stale_video.suffix.lower() in VIDEO_SUFFIXES:
-                    stale_video.unlink(missing_ok=True)
-            (task_dir / "preview.mp4").unlink(missing_ok=True)
-            return media_path, title, True, playback_url, playback_audio_url
-        except Exception:
-            # Keep the existing yt-dlp and full-video fallbacks for posts whose
-            # separate music track cannot be fetched as an ASR source.
-            pass
-
     if is_douyin and cached_video.is_file() and cached_video.stat().st_size > 0:
         try:
             if probe_duration(cached_video) > 1 and not _has_audio_stream(cached_video):
